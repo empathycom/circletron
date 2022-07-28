@@ -81,3 +81,12 @@ export const getBranchpointCommitAndTargetBranch = async (
     })
   })
 }
+
+export const getFilesChanged = async (commit: string): Promise<string[]> => {
+  const logProc = await spawnGetStdout('git', ['diff', '--name-only', 'HEAD', commit])
+  const files = logProc
+    .trim()
+    .split('\n')
+    .map((file) => file.trim())
+  return files
+}

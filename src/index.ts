@@ -8,7 +8,7 @@ import { join as pathJoin } from 'path'
 
 import { getLastSuccessfulBuildRevisionOnBranch } from './circle'
 import { requireEnv } from './env'
-import { getBranchpointCommitAndTargetBranch } from './git'
+import { getBranchpointCommitAndTargetBranch, getFilesChanged } from './git'
 import { spawnGetStdout } from './command'
 
 const CONTINUATION_API_URL = `https://circleci.com/api/v2/pipeline/continue`
@@ -35,6 +35,7 @@ interface CircletronConfig {
   targetBranchesRegex: RegExp
   passTargetBranch: boolean
   skip: 'workflows' | 'jobs'
+  files: string[]
 }
 
 async function getPackages(): Promise<Package[]> {
@@ -102,6 +103,10 @@ const getTriggerPackages = async (
     ))
   }
 
+  console.log("Checking for any files since commit '" + changesSinceCommit + "'")
+  const files = await getFilesChanged(changesSinceCommit)
+  const triggerAllPackages = config.files.some((file) => files.includes(file))
+
   console.log("Looking for changes since `%s'", changesSinceCommit)
   const changeOutput = (
     await spawnGetStdout('lerna', [
@@ -109,8 +114,7 @@ const getTriggerPackages = async (
       '--parseable',
       '--all',
       '--long',
-      '--since',
-      changesSinceCommit,
+      ...(triggerAllPackages ? [] : ['--since', changesSinceCommit]),
     ])
   ).trim()
 
@@ -249,6 +253,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     runOnlyChangedOnTargetBranches?: boolean
     passTargetBranch?: boolean
     skip?: string
+    files?: string
   } = {}
   try {
     rawConfig = yamlParse((await pReadFile(pathJoin('.circleci', 'circletron.yml'))).toString())
@@ -269,6 +274,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
       : DEFAULT_TARGET_BRANCHES_REGEX,
     passTargetBranch: Boolean(rawConfig.passTargetBranch),
     skip: skip,
+    files: rawConfig.files ? rawConfig.files.split(',') : [],
   }
 }
 

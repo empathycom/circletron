@@ -140,16 +140,30 @@ const getTriggerPackages = async (
 }
 
 const SKIP_WORKFLOW = {
-  jobs: ['skip'],
+  jobs: [
+    {
+      skip: {
+        docker: [{ image: 'circleci/node:14' }],
+        steps: [
+          {
+            run: {
+              name: 'Skip workflow',
+              command: 'circleci-agent step halt',
+            },
+          },
+        ],
+      },
+    },
+  ],
 }
 
 const SKIP_JOB = {
-  docker: [{ image: 'busybox:stable' }],
+  docker: [{ image: 'circleci/node:14' }],
   steps: [
     {
       run: {
-        name: 'Jobs not required',
-        command: 'echo "Jobs not required"',
+        name: 'Skip job',
+        command: 'circleci-agent step halt',
       },
     },
   ],

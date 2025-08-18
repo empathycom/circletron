@@ -88,6 +88,7 @@ export async function getLastSuccessfulBuildRevisionOnBranch(
     const headers = { 'Circle-Token': circleToken }
 
     if (slugAndBuildNumber) {
+      console.log('slugAndBuildNumber', slugAndBuildNumber)
       // call the API for pipelines, this does not reveal which workflows within the pipelines
       // were successful or not
       const { data: pipelineData } = await axios.get<CirclePipelines>(
@@ -100,14 +101,19 @@ export async function getLastSuccessfulBuildRevisionOnBranch(
         },
       )
 
+      console.log('pipelineData', JSON.stringify(pipelineData, null, 2))
       // for each pipeline, fetch the workflows and find the first one where all the workflows have a
       // 'success' or 'on hold' status.
       const lastSuccessfulBuild = await find(pipelineData.items, async (item) => {
+        console.log('item', JSON.stringify(item, null, 2))
+
         if (item.state === CirclePipelineState.Created) {
           const { data: workflowData } = await axios.get<CircleWorkflows>(
             `${CIRCLE_API_URL}/pipeline/${item.id}/workflow`,
             { headers },
           )
+
+          console.log('workflowData', JSON.stringify(workflowData, null, 2))
 
           return workflowData.items.every((item) =>
             [CircleWorkflowStatus.Success, CircleWorkflowStatus.OnHold].includes(item.status),

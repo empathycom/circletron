@@ -47,6 +47,7 @@ enum CircleWorkflowStatus {
 
 interface CircleWorkflowItem {
   id: string
+  name: string
   status: CircleWorkflowStatus
 }
 
@@ -64,6 +65,29 @@ async function find<I>(
   }
 
   return null
+}
+
+/**
+ * Determines which workflow should be preferred when deduplicating by name.
+ * Prefers workflows with better status (success > on_hold > running > others).
+ */
+function shouldPreferWorkflow(candidate: CircleWorkflowItem, existing: CircleWorkflowItem): boolean {
+  const statusPriority = {
+    [CircleWorkflowStatus.Success]: 5,
+    [CircleWorkflowStatus.OnHold]: 4,
+    [CircleWorkflowStatus.Running]: 3,
+    [CircleWorkflowStatus.NotRun]: 2,
+    [CircleWorkflowStatus.Failed]: 1,
+    [CircleWorkflowStatus.Error]: 1,
+    [CircleWorkflowStatus.Failing]: 1,
+    [CircleWorkflowStatus.Canceled]: 1,
+    [CircleWorkflowStatus.Unauthorized]: 0,
+  }
+
+  const candidatePriority = statusPriority[candidate.status] || 0
+  const existingPriority = statusPriority[existing.status] || 0
+
+  return candidatePriority > existingPriority
 }
 
 /**
@@ -100,18 +124,32 @@ export async function getLastSuccessfulBuildRevisionOnBranch(
         },
       )
 
-      // for each pipeline, fetch the workflows and find the first one where all the workflows have a
-      // 'success' or 'on hold' status.
-      const lastSuccessfulBuild = await find(pipelineData.items, async (item) => {
-        if (item.state === CirclePipelineState.Created) {
+      // for each pipeline, fetch the workflows and find the first one where after deduplication
+      // by workflow name, at least one workflow from each type has 'success' or 'on hold' status.
+      const lastSuccessfulBuild = await find(pipelineData.items, async (pipeline: CirclePipelineItem) => {
+        if (pipeline.state === CirclePipelineState.Created) {
           const { data: workflowData } = await axios.get<CircleWorkflows>(
-            `${CIRCLE_API_URL}/pipeline/${item.id}/workflow`,
+            `${CIRCLE_API_URL}/pipeline/${pipeline.id}/workflow`,
             { headers },
           )
 
-          return workflowData.items.every((item) =>
-            [CircleWorkflowStatus.Success, CircleWorkflowStatus.OnHold].includes(item.status),
+          // Deduplicate workflows by name, keeping the one with the latest/best status
+          const workflowMap = new Map<string, CircleWorkflowItem>()
+          for (const workflow of workflowData.items) {
+            const existing = workflowMap.get(workflow.name)
+            if (!existing || shouldPreferWorkflow(workflow, existing)) {
+              workflowMap.set(workflow.name, workflow)
+            }
+          }
+
+          // Check if at least one workflow from each type passed (success or on hold)
+          const uniqueWorkflows = Array.from(workflowMap.values())
+          const successfulWorkflows = uniqueWorkflows.filter((workflow) =>
+            [CircleWorkflowStatus.Success, CircleWorkflowStatus.OnHold].includes(workflow.status),
           )
+
+          // At least one workflow from each unique type should pass
+          return successfulWorkflows.length > 0 && successfulWorkflows.length === uniqueWorkflows.length
         } else {
           return false
         }

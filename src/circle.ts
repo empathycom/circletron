@@ -133,6 +133,8 @@ export async function getLastSuccessfulBuildRevisionOnBranch(
             { headers },
           )
 
+          console.log("workflowData", JSON.stringify(workflowData, null, 2))
+
           // Deduplicate workflows by name, keeping the one with the latest/best status
           const workflowMap = new Map<string, CircleWorkflowItem>()
           for (const workflow of workflowData.items) {

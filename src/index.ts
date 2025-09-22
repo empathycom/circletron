@@ -73,9 +73,21 @@ const getTriggerPackages = async (
   config: CircletronConfig,
   branch: string,
   isTargetBranch: boolean,
+  isScheduledJob: boolean,
 ): Promise<{ triggerPackages: Set<string>; targetBranch: string }> => {
   const changedPackages = new Set<string>()
   const allPackageNames = new Set(packages.map((pkg) => pkg.name))
+  
+  console.log('packages', allPackageNames)
+  if(isScheduledJob) {
+    const scheduledJobPackages = Array.from(allPackageNames).filter((name) => name.includes('production-tests'))
+    console.log('Running only relevant pipelines for scheduled job', {
+      branch,
+      allPackageNames,
+      scheduledJobPackages,
+    })
+    return { triggerPackages: new Set(scheduledJobPackages), targetBranch: branch }
+  }
 
   let changesSinceCommit: string
   let targetBranch: string | undefined = branch
@@ -272,9 +284,10 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
   }
 }
 
-export async function triggerCiJobs(branch: string, continuationKey: string): Promise<void> {
+export async function triggerCiJobs(branch: string, continuationKey: string, isScheduledJob: boolean): Promise<void> {
   const circletronConfig = await getCircletronConfig()
   const packages = await getPackages()
+  console.log('isScheduledJob', isScheduledJob)
   // run all jobs on target branches
   const isTargetBranch = circletronConfig.targetBranchesRegex.test(branch)
   const { triggerPackages, targetBranch } = await getTriggerPackages(
@@ -282,6 +295,7 @@ export async function triggerCiJobs(branch: string, continuationKey: string): Pr
     circletronConfig,
     branch,
     isTargetBranch,
+    isScheduledJob,
   )
 
   const configuration = await buildConfiguration(packages, triggerPackages, circletronConfig)
@@ -303,8 +317,9 @@ export async function triggerCiJobs(branch: string, continuationKey: string): Pr
 if (require.main === module) {
   const branch = requireEnv('CIRCLE_BRANCH')
   const continuationKey = requireEnv('CIRCLE_CONTINUATION_KEY')
+  const isScheduledJob = requireEnv('SCHEDULED_JOB_TRIGGER') === 'true'
 
-  triggerCiJobs(branch, continuationKey).catch((err) => {
+  triggerCiJobs(branch, continuationKey, isScheduledJob).catch((err) => {
     console.warn('Got error: %O', err)
     process.exit(1)
   })

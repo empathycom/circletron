@@ -74,19 +74,28 @@ const getTriggerPackages = async (
   branch: string,
   isTargetBranch: boolean,
   isScheduledJob: boolean,
-): Promise<{ triggerPackages: Set<string>; targetBranch: string }> => {
+): Promise<{
+  triggerPackages: Set<string>
+  targetBranch: string
+  filteredPackages: Package[]
+}> => {
   const changedPackages = new Set<string>()
   const allPackageNames = new Set(packages.map((pkg) => pkg.name))
-  
-  console.log('packages', allPackageNames)
-  if(isScheduledJob) {
-    const scheduledJobPackages = Array.from(allPackageNames).filter((name) => name.includes('production-tests'))
+
+  if (isScheduledJob) {
+    const scheduledJobPackages = Array.from(packages).filter((pkg) =>
+      pkg.name.includes('production-tests'),
+    )
     console.log('Running only relevant pipelines for scheduled job', {
       branch,
-      allPackageNames,
       scheduledJobPackages,
+      allPackageNames,
     })
-    return { triggerPackages: new Set(scheduledJobPackages), targetBranch: branch }
+    return {
+      triggerPackages: new Set(scheduledJobPackages.map((pkg) => pkg.name)),
+      targetBranch: branch,
+      filteredPackages: scheduledJobPackages,
+    }
   }
 
   let changesSinceCommit: string
@@ -100,13 +109,13 @@ const getTriggerPackages = async (
 
       if (!lastBuildCommit) {
         console.log(`Could not find a previous build on ${branch}, running all pipelines`)
-        return { triggerPackages: allPackageNames, targetBranch }
+        return { triggerPackages: allPackageNames, targetBranch, filteredPackages: packages }
       }
 
       changesSinceCommit = lastBuildCommit
     } else {
       console.log(`Detected a push from ${branch}, running all pipelines`)
-      return { triggerPackages: allPackageNames, targetBranch }
+      return { triggerPackages: allPackageNames, targetBranch, filteredPackages: packages }
     }
   } else {
     ;({ commit: changesSinceCommit, targetBranch } = await getBranchpointCommitAndTargetBranch(
@@ -148,6 +157,7 @@ const getTriggerPackages = async (
         .filter((pkg) => allPackageNames.has(pkg)),
     ),
     targetBranch: targetBranch ?? branch,
+    filteredPackages: packages,
   }
 }
 
@@ -284,13 +294,16 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
   }
 }
 
-export async function triggerCiJobs(branch: string, continuationKey: string, isScheduledJob: boolean): Promise<void> {
+export async function triggerCiJobs(
+  branch: string,
+  continuationKey: string,
+  isScheduledJob: boolean,
+): Promise<void> {
   const circletronConfig = await getCircletronConfig()
   const packages = await getPackages()
-  console.log('isScheduledJob', isScheduledJob)
   // run all jobs on target branches
   const isTargetBranch = circletronConfig.targetBranchesRegex.test(branch)
-  const { triggerPackages, targetBranch } = await getTriggerPackages(
+  const { filteredPackages, triggerPackages, targetBranch } = await getTriggerPackages(
     packages,
     circletronConfig,
     branch,
@@ -298,7 +311,11 @@ export async function triggerCiJobs(branch: string, continuationKey: string, isS
     isScheduledJob,
   )
 
-  const configuration = await buildConfiguration(packages, triggerPackages, circletronConfig)
+  const configuration = await buildConfiguration(
+    filteredPackages,
+    triggerPackages,
+    circletronConfig,
+  )
   const body: {
     'continuation-key': string
     configuration: string
@@ -318,6 +335,7 @@ if (require.main === module) {
   const branch = requireEnv('CIRCLE_BRANCH')
   const continuationKey = requireEnv('CIRCLE_CONTINUATION_KEY')
   const isScheduledJob = requireEnv('SCHEDULED_JOB_TRIGGER') === 'true'
+  console.log('isScheduledJob', isScheduledJob)
 
   triggerCiJobs(branch, continuationKey, isScheduledJob).catch((err) => {
     console.warn('Got error: %O', err)

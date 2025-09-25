@@ -73,7 +73,7 @@ const getTriggerPackages = async (
   config: CircletronConfig,
   branch: string,
   isTargetBranch: boolean,
-  isScheduledJob: boolean,
+  scheduleJobToRun?: string,
 ): Promise<{
   triggerPackages: Set<string>
   targetBranch: string
@@ -82,9 +82,10 @@ const getTriggerPackages = async (
   const changedPackages = new Set<string>()
   const allPackageNames = new Set(packages.map((pkg) => pkg.name))
 
-  if (isScheduledJob) {
+  if (scheduleJobToRun) {
+
     const scheduledJobPackages = Array.from(packages).filter((pkg) =>
-      pkg.name.includes('production-tests'),
+      pkg.name.includes(scheduleJobToRun),
     )
     console.log('Running only relevant pipelines for scheduled job', {
       branch,
@@ -297,7 +298,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
 export async function triggerCiJobs(
   branch: string,
   continuationKey: string,
-  isScheduledJob: boolean,
+  scheduleJobToRun?: string,
 ): Promise<void> {
   const circletronConfig = await getCircletronConfig()
   const packages = await getPackages()
@@ -308,7 +309,7 @@ export async function triggerCiJobs(
     circletronConfig,
     branch,
     isTargetBranch,
-    isScheduledJob,
+    scheduleJobToRun,
   )
 
   const configuration = await buildConfiguration(
@@ -334,10 +335,10 @@ export async function triggerCiJobs(
 if (require.main === module) {
   const branch = requireEnv('CIRCLE_BRANCH')
   const continuationKey = requireEnv('CIRCLE_CONTINUATION_KEY')
-  const isScheduledJob = requireEnv('SCHEDULED_JOB_TRIGGER') === 'true'
-  console.log('isScheduledJob', isScheduledJob)
+  const scheduleJobToRun = requireEnv('TRIGGER_SCHEDULED_JOB')
+  console.log('scheduleJobsToRun', scheduleJobToRun)
 
-  triggerCiJobs(branch, continuationKey, isScheduledJob).catch((err) => {
+  triggerCiJobs(branch, continuationKey, scheduleJobToRun).catch((err) => {
     console.warn('Got error: %O', err)
     process.exit(1)
   })

@@ -73,7 +73,7 @@ const getTriggerPackages = async (
   config: CircletronConfig,
   branch: string,
   isTargetBranch: boolean,
-  scheduleJobToRun?: string,
+  scheduleJobToRun: string,
 ): Promise<{
   triggerPackages: Set<string>
   targetBranch: string
@@ -82,7 +82,7 @@ const getTriggerPackages = async (
   const changedPackages = new Set<string>()
   const allPackageNames = new Set(packages.map((pkg) => pkg.name))
 
-  if (scheduleJobToRun) {
+  if (scheduleJobToRun !== "default") {
 
     const scheduledJobPackages = Array.from(packages).filter((pkg) =>
       pkg.name.includes(scheduleJobToRun),
@@ -298,7 +298,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
 export async function triggerCiJobs(
   branch: string,
   continuationKey: string,
-  scheduleJobToRun?: string,
+  scheduleJobToRun: string,
 ): Promise<void> {
   const circletronConfig = await getCircletronConfig()
   const packages = await getPackages()

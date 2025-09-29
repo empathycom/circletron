@@ -336,7 +336,7 @@ if (require.main === module) {
   const branch = requireEnv('CIRCLE_BRANCH')
   const continuationKey = requireEnv('CIRCLE_CONTINUATION_KEY')
   const scheduleJobToRun = requireEnv('TRIGGER_SCHEDULED_JOB')
-  console.log('scheduleJobsToRun', scheduleJobToRun)
+  console.log('scheduleJobToRun', scheduleJobToRun)
 
   triggerCiJobs(branch, continuationKey, scheduleJobToRun).catch((err) => {
     console.warn('Got error: %O', err)

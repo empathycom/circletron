@@ -1,6 +1,6 @@
 {
   "name": "circletron",
-  "version": "3.0.6",
+  "version": "3.1.0",
   "description": "circle orb for dealing with monorepos",
   "author": "insidewhy <github@chilon.net>",
   "license": "ISC",
@@ -29,7 +29,8 @@
     "lint-fix": "npm run lint -- --fix",
     "validate-prettiness": "prettier -c 'src/*.ts' '*.md'",
     "make-prettier": "npm run validate-prettiness -- --write",
-    "test": "npm run jest",
+    "test": "npm run build && npm run jest",
+    "jest": "jest",
     "watch": "npm run build && concurrently 'npm run build-watch' 'npm run jest-watch'",
     "typecheck": "npm run build -- --noEmit",
     "validate": "npm run test && npm run lint && npm run validate-prettiness && npm run typecheck",

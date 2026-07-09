@@ -10,6 +10,10 @@ import { getLastSuccessfulBuildRevisionOnBranch } from './circle'
 import { requireEnv } from './env'
 import { getBranchpointCommitAndTargetBranch } from './git'
 import { spawnGetStdout } from './command'
+import { DEFAULT_SKIP_ARTIFACT_PATH, runReportSkipCli } from './report-skip'
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { version: CIRCLETRON_VERSION } = require('../package.json')
 
 const CONTINUATION_API_URL = `https://circleci.com/api/v2/pipeline/continue`
 const DEFAULT_CONFIG_VERSION = 2.1
@@ -19,22 +23,23 @@ const DEFAULT_SKIP = 'jobs'
 
 const pReadFile = promisify(readFile)
 
-interface CircleConfig {
+export interface CircleConfig {
   dependencies?: string[]
   workflows?: Record<string, unknown>
   [k: string]: unknown
 }
 
-interface Package {
+export interface Package {
   name: string
   circleConfig: CircleConfig
 }
 
-interface CircletronConfig {
+export interface CircletronConfig {
   runOnlyChangedOnTargetBranches: boolean
   targetBranchesRegex: RegExp
   passTargetBranch: boolean
   skip: 'workflows' | 'jobs'
+  skipIndication: boolean
 }
 
 async function getPackages(): Promise<Package[]> {
@@ -82,8 +87,7 @@ const getTriggerPackages = async (
   const changedPackages = new Set<string>()
   const allPackageNames = new Set(packages.map((pkg) => pkg.name))
 
-  if (scheduleJobToRun !== "default") {
-
+  if (scheduleJobToRun !== 'default') {
     const scheduledJobPackages = Array.from(packages).filter((pkg) =>
       pkg.name.includes(scheduleJobToRun),
     )
@@ -178,7 +182,40 @@ const SKIP_JOB = {
   ],
 }
 
-async function buildConfiguration(
+const SKIP_JOB_WITH_INDICATION = {
+  parameters: {
+    'workflow-name': {
+      type: 'string',
+      default: '',
+    },
+  },
+  docker: [{ image: `circletron/circletron:${CIRCLETRON_VERSION}` }],
+  environment: {
+    CIRCLETRON_PIPELINE_ID: '<< pipeline.id >>',
+    CIRCLETRON_PIPELINE_NUMBER: '<< pipeline.number >>',
+  },
+  steps: [
+    {
+      run: {
+        name: 'Jobs not required',
+        command:
+          'circletron report-skip --workflow "<< parameters.workflow-name >>" --reason unaffected',
+      },
+    },
+    {
+      store_artifacts: {
+        path: DEFAULT_SKIP_ARTIFACT_PATH,
+        destination: 'circletron/skip.json',
+      },
+    },
+  ],
+}
+
+const buildSkipWorkflowWithIndication = (workflowName: string): Record<string, unknown> => ({
+  jobs: [{ skip: { 'workflow-name': workflowName } }],
+})
+
+export async function buildConfiguration(
   packages: Package[],
   triggerPackages: Set<string>,
   circletronConfig: CircletronConfig,
@@ -249,13 +286,15 @@ async function buildConfiguration(
       }
     }
     if (circletronConfig.skip === 'workflows') {
-      config.jobs['skip'] = SKIP_JOB
+      config.jobs['skip'] = circletronConfig.skipIndication ? SKIP_JOB_WITH_INDICATION : SKIP_JOB
       if (triggerPackages.has(pkg.name)) {
         mergeObject('workflows', circleConfig)
       } else {
         if (circleConfig.workflows) {
           Object.keys(circleConfig.workflows).forEach((workflowName) => {
-            config.workflows[workflowName] = SKIP_WORKFLOW
+            config.workflows[workflowName] = circletronConfig.skipIndication
+              ? buildSkipWorkflowWithIndication(workflowName)
+              : SKIP_WORKFLOW
           })
         }
       }
@@ -272,6 +311,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     runOnlyChangedOnTargetBranches?: boolean
     passTargetBranch?: boolean
     skip?: string
+    skipIndication?: boolean
   } = {}
   try {
     rawConfig = yamlParse((await pReadFile(pathJoin('.circleci', 'circletron.yml'))).toString())
@@ -292,6 +332,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
       : DEFAULT_TARGET_BRANCHES_REGEX,
     passTargetBranch: Boolean(rawConfig.passTargetBranch),
     skip: skip,
+    skipIndication: Boolean(rawConfig.skipIndication),
   }
 }
 
@@ -333,13 +374,22 @@ export async function triggerCiJobs(
 }
 
 if (require.main === module) {
-  const branch = requireEnv('CIRCLE_BRANCH')
-  const continuationKey = requireEnv('CIRCLE_CONTINUATION_KEY')
-  const scheduleJobToRun = requireEnv('TRIGGER_SCHEDULED_JOB')
-  console.log('scheduleJobToRun', scheduleJobToRun)
+  const [command, ...commandArgs] = process.argv.slice(2)
 
-  triggerCiJobs(branch, continuationKey, scheduleJobToRun).catch((err) => {
-    console.warn('Got error: %O', err)
-    process.exit(1)
-  })
+  if (command === 'report-skip') {
+    runReportSkipCli(commandArgs).catch((err) => {
+      console.warn('Got error: %O', err)
+      process.exit(1)
+    })
+  } else {
+    const branch = requireEnv('CIRCLE_BRANCH')
+    const continuationKey = requireEnv('CIRCLE_CONTINUATION_KEY')
+    const scheduleJobToRun = requireEnv('TRIGGER_SCHEDULED_JOB')
+    console.log('scheduleJobToRun', scheduleJobToRun)
+
+    triggerCiJobs(branch, continuationKey, scheduleJobToRun).catch((err) => {
+      console.warn('Got error: %O', err)
+      process.exit(1)
+    })
+  }
 }

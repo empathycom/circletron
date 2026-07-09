@@ -10,7 +10,6 @@ const baseConfig: CircletronConfig = {
   targetBranchesRegex: /^main$/,
   passTargetBranch: false,
   skip: 'workflows',
-  skipIndication: false,
 }
 
 const makePackages = (): Package[] => [
@@ -39,39 +38,8 @@ const makePackages = (): Package[] => [
 ]
 
 describe('buildConfiguration with skip: workflows', () => {
-  it('replaces skipped workflows with the plain skip job when skipIndication is off', async () => {
+  it('generates a skip job that reports skips', async () => {
     const output = await buildConfiguration(makePackages(), new Set(['pkg-a']), baseConfig)
-    const config = yamlParse(output)
-
-    expect(config.workflows['workflow-a']).toEqual({ jobs: ['test-a'] })
-    expect(config.workflows['workflow-b']).toEqual({ jobs: ['skip'] })
-    expect(config.jobs.skip).toEqual({
-      docker: [{ image: 'busybox:stable' }],
-      steps: [
-        {
-          run: {
-            name: 'Jobs not required',
-            command: 'echo "Jobs not required"',
-          },
-        },
-      ],
-    })
-  })
-
-  it('produces identical output when skipIndication is explicitly false', async () => {
-    const withoutOption = await buildConfiguration(makePackages(), new Set(['pkg-a']), baseConfig)
-    const withFalseOption = await buildConfiguration(makePackages(), new Set(['pkg-a']), {
-      ...baseConfig,
-      skipIndication: false,
-    })
-    expect(withFalseOption).toEqual(withoutOption)
-  })
-
-  it('generates a skip job that reports skips when skipIndication is on', async () => {
-    const output = await buildConfiguration(makePackages(), new Set(['pkg-a']), {
-      ...baseConfig,
-      skipIndication: true,
-    })
     const config = yamlParse(output)
 
     // untouched workflow for the triggered package
@@ -109,11 +77,12 @@ describe('buildConfiguration with skip: workflows', () => {
     ])
   })
 
-  it('does not touch non-skipped workflows when skipIndication is on', async () => {
-    const output = await buildConfiguration(makePackages(), new Set(['pkg-a', 'pkg-b']), {
-      ...baseConfig,
-      skipIndication: true,
-    })
+  it('does not touch non-skipped workflows', async () => {
+    const output = await buildConfiguration(
+      makePackages(),
+      new Set(['pkg-a', 'pkg-b']),
+      baseConfig,
+    )
     const config = yamlParse(output)
     expect(config.workflows['workflow-a']).toEqual({ jobs: ['test-a'] })
     expect(config.workflows['workflow-b']).toEqual({ jobs: ['test-b'] })

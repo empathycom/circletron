@@ -83,14 +83,7 @@ In cases where you share jobs across workflows it might be more relevant to crea
 
 ## Skip indication
 
-By default a skipped workflow (`skip: workflows`) is replaced by a green `skip` job that is indistinguishable from a real passing run in the GitHub checks UI. The `skipIndication` option makes skips visibly and machine-readably distinct while keeping the green `skip` job so required status checks stay satisfied:
-
-```yml
-skip: workflows
-skipIndication: true
-```
-
-When enabled, the generated `skip` job (which keeps its name and still exits successfully) additionally:
+With `skip: workflows`, a skipped workflow is replaced by a green `skip` job so required status checks stay satisfied, while making skips visibly and machine-readably distinct from real passing runs. The generated `skip` job (which always exits successfully):
 
 1. Publishes a GitHub check run on the pipeline's commit with conclusion `skipped`, named `<workflow> (circletron: skipped — unaffected)` so it can never collide with a CircleCI-reported required check name. The summary explains that the package was unaffected on this branch.
 2. Uploads a machine-readable JSON artifact (registered via `store_artifacts` at `circletron/skip.json`) so tooling can count real runs vs skips:

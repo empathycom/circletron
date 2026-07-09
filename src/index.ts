@@ -39,7 +39,6 @@ export interface CircletronConfig {
   targetBranchesRegex: RegExp
   passTargetBranch: boolean
   skip: 'workflows' | 'jobs'
-  skipIndication: boolean
 }
 
 async function getPackages(): Promise<Package[]> {
@@ -166,10 +165,6 @@ const getTriggerPackages = async (
   }
 }
 
-const SKIP_WORKFLOW = {
-  jobs: ['skip'],
-}
-
 const SKIP_JOB = {
   docker: [{ image: 'busybox:stable' }],
   steps: [
@@ -286,15 +281,13 @@ export async function buildConfiguration(
       }
     }
     if (circletronConfig.skip === 'workflows') {
-      config.jobs['skip'] = circletronConfig.skipIndication ? SKIP_JOB_WITH_INDICATION : SKIP_JOB
+      config.jobs['skip'] = SKIP_JOB_WITH_INDICATION
       if (triggerPackages.has(pkg.name)) {
         mergeObject('workflows', circleConfig)
       } else {
         if (circleConfig.workflows) {
           Object.keys(circleConfig.workflows).forEach((workflowName) => {
-            config.workflows[workflowName] = circletronConfig.skipIndication
-              ? buildSkipWorkflowWithIndication(workflowName)
-              : SKIP_WORKFLOW
+            config.workflows[workflowName] = buildSkipWorkflowWithIndication(workflowName)
           })
         }
       }
@@ -311,7 +304,6 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     runOnlyChangedOnTargetBranches?: boolean
     passTargetBranch?: boolean
     skip?: string
-    skipIndication?: boolean
   } = {}
   try {
     rawConfig = yamlParse((await pReadFile(pathJoin('.circleci', 'circletron.yml'))).toString())
@@ -332,7 +324,6 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
       : DEFAULT_TARGET_BRANCHES_REGEX,
     passTargetBranch: Boolean(rawConfig.passTargetBranch),
     skip: skip,
-    skipIndication: Boolean(rawConfig.skipIndication),
   }
 }
 

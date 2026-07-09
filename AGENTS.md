@@ -38,4 +38,4 @@ Important: jest is configured with `roots: ['<rootDir>/dist']` and `testRegex: '
 
 - Bump `version` in `package.json`, update the executor image tag in `orb.yml`, and add a `changelog.md` entry.
 - Publish with `npm run docker-build` / `docker-push` and `npm run orb-publish`.
-- Publish the Docker image before (or together with) the npm package/orb: with `skipIndication` enabled the generated skip job references `circletron/circletron:<version>`, so that image tag must exist when consumers upgrade.
+- Publish the Docker image before (or together with) the npm package/orb: with `skip: workflows` the generated skip job references `circletron/circletron:<version>`, so that image tag must exist when consumers upgrade.

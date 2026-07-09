@@ -2,7 +2,7 @@
 
 - 2026/07/09 - 3.1.0
 
-  - Add `skipIndication` configuration option: skipped workflows publish a `skipped` GitHub check run and upload a machine-readable skip artifact.
+  - Skipped workflows (`skip: workflows`) now publish a `skipped` GitHub check run and upload a machine-readable skip artifact by default.
   - Add `report-skip` subcommand so custom skip paths can share the same check-run naming convention and artifact schema.
 
 - 2021/02/03 - 3.0.5

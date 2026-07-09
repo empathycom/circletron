@@ -23,18 +23,18 @@ const DEFAULT_SKIP = 'jobs'
 
 const pReadFile = promisify(readFile)
 
-export interface CircleConfig {
+interface CircleConfig {
   dependencies?: string[]
   workflows?: Record<string, unknown>
   [k: string]: unknown
 }
 
-export interface Package {
+interface Package {
   name: string
   circleConfig: CircleConfig
 }
 
-export interface CircletronConfig {
+interface CircletronConfig {
   runOnlyChangedOnTargetBranches: boolean
   targetBranchesRegex: RegExp
   passTargetBranch: boolean

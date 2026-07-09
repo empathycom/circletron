@@ -105,6 +105,30 @@ describe('reportSkip', () => {
     }
   })
 
+  it('warns and still attempts the check run when writing the artifact fails', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+    try {
+      // /dev/null is not a directory so creating the artifact directory fails
+      await expect(
+        reportSkip('my-package', 'unaffected', join('/dev/null', 'sub', 'skip.json'), {
+          ...testEnv,
+          GITHUB_CHECKS_TOKEN: 'gh-token',
+        }),
+      ).resolves.toBeUndefined()
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('failed to write skip artifact'),
+      )
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        'https://api.github.com/repos/empathycom/circletron/check-runs',
+        buildCheckRunPayload('my-package', 'unaffected', 'abc123'),
+        expect.anything(),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it('warns and still succeeds when the check run request fails', async () => {
     mockedAxios.post.mockRejectedValue(new Error('boom'))
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation()

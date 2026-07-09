@@ -1,9 +1,14 @@
 import { parse as yamlParse } from 'yaml'
 
-import { buildConfiguration, CircletronConfig, Package } from './index'
+import { buildConfiguration } from './index'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { version } = require('../package.json')
+
+// derive the (internal) parameter shapes from the function signature instead of
+// expanding the package's public type exports
+type Packages = Parameters<typeof buildConfiguration>[0]
+type CircletronConfig = Parameters<typeof buildConfiguration>[2]
 
 const baseConfig: CircletronConfig = {
   runOnlyChangedOnTargetBranches: true,
@@ -12,7 +17,7 @@ const baseConfig: CircletronConfig = {
   skip: 'workflows',
 }
 
-const makePackages = (): Package[] => [
+const makePackages = (): Packages => [
   {
     name: 'pkg-a',
     circleConfig: {

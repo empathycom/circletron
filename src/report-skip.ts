@@ -77,9 +77,18 @@ export async function reportSkip(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   const artifact = buildSkipArtifact(workflow, reason, env)
-  await pMkdir(dirname(artifactPath), { recursive: true })
-  await pWriteFile(artifactPath, JSON.stringify(artifact, undefined, 2))
-  console.log(`Wrote skip artifact to ${artifactPath}`)
+  try {
+    await pMkdir(dirname(artifactPath), { recursive: true })
+    await pWriteFile(artifactPath, JSON.stringify(artifact, undefined, 2))
+    console.log(`Wrote skip artifact to ${artifactPath}`)
+  } catch (e) {
+    // never fail the skip job: a missing artifact must not break required status checks
+    console.warn(
+      `Warning: failed to write skip artifact to ${artifactPath}: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    )
+  }
 
   const token = env[GITHUB_CHECKS_TOKEN_VAR]
   if (!token) {

@@ -83,7 +83,7 @@ describe('reportSkip', () => {
       {
         headers: {
           Accept: 'application/vnd.github+json',
-          Authorization: 'Bearer ' + 'gh-token',
+          Authorization: `Bearer ${'gh-token'}`,
         },
       },
     )

@@ -107,12 +107,14 @@ export async function reportSkip(
     await axios.post(`${GITHUB_API_URL}/repos/${owner}/${repo}/check-runs`, payload, {
       headers: {
         Accept: 'application/vnd.github+json',
-        Authorization: 'Bearer ' + token,
+        Authorization: `Bearer ${token}`,
       },
     })
-    console.log(`Created check run '${payload.name}' for ${owner}/${repo}@${headSha}`)
+    console.log(`Created check run '${payload.name}'`)
   } catch (e) {
-    console.warn(`Warning: failed to create GitHub check run: ${e.message}`)
+    console.warn(
+      `Warning: failed to create GitHub check run: ${e instanceof Error ? e.message : String(e)}`,
+    )
   }
 }
 
@@ -120,10 +122,15 @@ export async function runReportSkipCli(args: string[]): Promise<void> {
   let workflow: string | undefined
   let reason = 'unaffected'
   for (let i = 0; i < args.length; ++i) {
-    if (args[i] === '--workflow') {
-      workflow = args[++i]
-    } else if (args[i] === '--reason') {
-      reason = args[++i]
+    if (args[i] === '--workflow' || args[i] === '--reason') {
+      if (i + 1 >= args.length) {
+        throw new Error(`Missing value for ${args[i]}`)
+      }
+      if (args[i] === '--workflow') {
+        workflow = args[++i]
+      } else {
+        reason = args[++i]
+      }
     } else {
       throw new Error(`Unknown argument: ${args[i]}`)
     }

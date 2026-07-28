@@ -9,7 +9,7 @@ circletron is a CircleCI setup/continuation tool for lerna monorepos. It merges 
 ## Layout
 
 - `src/index.ts` — CLI entry point; config generation (`buildConfiguration`), `.circleci/circletron.yml` parsing (`getCircletronConfig`), pipeline continuation.
-- `src/report-skip.ts` — `circletron report-skip` subcommand: GitHub check run posting and skip artifact writing.
+- `src/report-skip.ts` — GitHub check run posting and skip artifact writing: used by the `skip: check-runs` mode and the `circletron report-skip` subcommand.
 - `src/circle.ts` — CircleCI API v2 client (last successful build lookup).
 - `src/git.ts` — branchpoint/target-branch detection.
 - `src/*.spec.ts` — jest tests (compiled to `dist/` before running).
@@ -32,10 +32,10 @@ Important: jest is configured with `roots: ['<rootDir>/dist']` and `testRegex: '
 - TypeScript strict mode; formatting enforced by prettier (`.prettierrc`), linting by eslint (`.eslintrc.yaml`). Run prettier before committing.
 - Keep changes minimal and backward compatible: generated CircleCI config must stay byte-identical for consumers unless they opt into a new config option.
 - New config options live in `.circleci/circletron.yml` and are parsed in `getCircletronConfig` with safe defaults.
-- The generated `skip` job must always exist and exit green when workflows are skipped — consumers use it as a required status check; never rename it or let it fail.
+- Whenever a skip workflow is generated (`skip: workflows`, or the `check-runs` fallback) its `skip` job must exit green — consumers use it as a required status check; never rename it or let it fail. In `check-runs` mode skipped workflows are omitted and the `skipped` check run satisfies the required check instead; that path must stay best-effort and never block merges.
 
 ## Releasing
 
 - Bump `version` in `package.json`, update the executor image tag in `orb.yml`, and add a `changelog.md` entry.
 - Publish with `npm run docker-build` / `docker-push` and `npm run orb-publish`.
-- Publish the Docker image before (or together with) the npm package/orb: with `skip: workflows` the generated skip job references `circletron/circletron:<version>`, so that image tag must exist when consumers upgrade.
+- Publish the Docker image before (or together with) the npm package/orb: the orb executor references `circletron/circletron:<version>`, so that image tag must exist when consumers upgrade.

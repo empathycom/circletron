@@ -3,7 +3,14 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import axios from 'axios'
 
-import { buildCheckRunPayload, buildSkipArtifact, reportSkip } from './report-skip'
+import {
+  buildCheckRunPayload,
+  buildSkipArtifact,
+  getCheckRunTarget,
+  postSkippedCheckRun,
+  reportSkip,
+  writeSkipsArtifact,
+} from './report-skip'
 
 jest.mock('axios')
 const mockedAxios = axios as jest.Mocked<typeof axios>
@@ -38,6 +45,103 @@ describe('buildCheckRunPayload', () => {
     expect(payload.output.summary).toEqual(
       'The workflow `my-package` was skipped by circletron (reason: halted-on-branch).',
     )
+  })
+})
+
+describe('getCheckRunTarget', () => {
+  it('returns the target when the token and project variables are set', () => {
+    expect(getCheckRunTarget({ ...testEnv, GITHUB_CHECKS_TOKEN: 'gh-token' })).toEqual({
+      owner: 'empathycom',
+      repo: 'circletron',
+      headSha: 'abc123',
+      token: 'gh-token',
+    })
+  })
+
+  it('returns undefined when the token or a project variable is missing', () => {
+    expect(getCheckRunTarget(testEnv)).toBeUndefined()
+    expect(
+      getCheckRunTarget({ ...testEnv, GITHUB_CHECKS_TOKEN: 'gh-token', CIRCLE_SHA1: undefined }),
+    ).toBeUndefined()
+  })
+})
+
+describe('postSkippedCheckRun', () => {
+  const target = { owner: 'empathycom', repo: 'circletron', headSha: 'abc123', token: 'gh-token' }
+
+  beforeEach(() => {
+    mockedAxios.post.mockReset()
+    mockedAxios.post.mockResolvedValue({ data: {} })
+  })
+
+  it('posts a skipped check run under the exact required check name', async () => {
+    await expect(
+      postSkippedCheckRun(target, 'ci/circleci: my-workflow', 'my-workflow'),
+    ).resolves.toBe(true)
+
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      'https://api.github.com/repos/empathycom/circletron/check-runs',
+      {
+        name: 'ci/circleci: my-workflow',
+        head_sha: 'abc123',
+        status: 'completed',
+        conclusion: 'skipped',
+        output: {
+          title: 'Workflow skipped: unaffected',
+          summary:
+            'The workflow `my-workflow` was skipped by circletron because the package was unaffected by the changes on this branch.',
+        },
+      },
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: 'Bearer gh-token',
+        },
+      },
+    )
+  })
+
+  it('returns false and warns when the request fails', async () => {
+    mockedAxios.post.mockRejectedValue(new Error('boom'))
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+    try {
+      await expect(postSkippedCheckRun(target, 'my-workflow', 'my-workflow')).resolves.toBe(false)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("failed to create check run 'my-workflow'"),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('writeSkipsArtifact', () => {
+  const artifactPath = join(tmpdir(), `circletron-test-${process.pid}`, 'skips.json')
+
+  it('writes every skipped workflow together with the pipeline metadata', async () => {
+    await writeSkipsArtifact(['workflow-a', 'workflow-b'], artifactPath, testEnv)
+    expect(JSON.parse(readFileSync(artifactPath).toString())).toEqual({
+      skippedWorkflows: ['workflow-a', 'workflow-b'],
+      pipelineId: 'pipeline-id',
+      pipelineNumber: '42',
+      commitSha: 'abc123',
+      branch: 'main',
+    })
+  })
+
+  it('warns instead of throwing when the artifact cannot be written', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+    try {
+      // /dev/null is not a directory so creating the artifact directory fails
+      await expect(
+        writeSkipsArtifact([], join('/dev/null', 'sub', 'skips.json'), testEnv),
+      ).resolves.toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('failed to write skips artifact'),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
   })
 })
 

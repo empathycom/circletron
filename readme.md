@@ -81,17 +81,42 @@ skip: workflows
 When circletron is set to skip: jobs, instead of omitting jobs for GitHub protection rules, we run a simple job that returns success.
 In cases where you share jobs across workflows it might be more relevant to create a simple workflow that will run a single skip job and returns success. That way if two packages share a job circletron will know to omit running it on packages that haven't changed.
 
-## Skip indication
+## Skipping via check runs
 
-With `skip: workflows`, a skipped workflow is replaced by a green `skip` job so required status checks stay satisfied, while making skips visibly and machine-readably distinct from real passing runs. The generated `skip` job (which always exits successfully):
+`skip: check-runs` avoids running anything at all for unaffected packages. Instead of generating a green `skip` workflow per skipped package, the setup job (`trigger-jobs`) posts a GitHub check run for each skipped workflow — named exactly like the check CircleCI would have reported, with conclusion `skipped`, which GitHub branch protection accepts as passing — and the skipped workflows are omitted from the generated configuration entirely. A pipeline with N unaffected packages costs N GitHub API calls instead of N workflow runs, cutting queue time and CI load.
 
-1. Publishes a GitHub check run on the pipeline's commit with conclusion `skipped`, named `<workflow> (circletron: skipped — unaffected)` so it can never collide with a CircleCI-reported required check name. The summary explains that the package was unaffected on this branch.
-2. Uploads a machine-readable JSON artifact (registered via `store_artifacts` at `circletron/skip.json`) so tooling can count real runs vs skips:
+```yml
+# .circleci/circletron.yml
+skip: check-runs
+# only needed when the required check name differs from the workflow name:
+checkNames:
+  my-workflow: 'ci/circleci: my-workflow'
+```
+
+Creating check runs requires the `GITHUB_CHECKS_TOKEN` environment variable on the setup job, typically injected via a CircleCI context:
+
+```yml
+# .circleci/config.yml
+workflows:
+  trigger-jobs:
+    jobs:
+      - circletron/trigger-jobs:
+          context: github-checks
+```
+
+Classic GitHub personal access tokens **cannot** create check runs: the token must be a GitHub App installation token or a fine-grained PAT with `checks: write` permission on the repository.
+
+The mode is fully best-effort: when the token is missing or a check run cannot be posted, each affected workflow falls back to the plain green `skip` workflow (the `skip: workflows` behaviour), so merges are never blocked.
+
+Before relying on this mode, verify on a test repository that a check run posted by your App/PAT satisfies your required checks: classic branch protection can pin a required check to the app that first reported it (e.g. the CircleCI Checks app), in which case a same-named check run from another source is ignored. Repository rulesets make the accepted source explicit.
+
+### Skips artifact
+
+Whatever the skip mode, the setup job writes a machine-readable summary of every skipped workflow to `/tmp/circletron/skips.json` and uploads it as the `circletron/skips.json` artifact, so tooling can count real runs vs skips:
 
 ```json
 {
-  "workflow": "my-workflow",
-  "status": "skipped-unaffected",
+  "skippedWorkflows": ["my-workflow"],
   "pipelineId": "<pipeline id>",
   "pipelineNumber": "<pipeline number>",
   "commitSha": "<sha>",
@@ -99,16 +124,12 @@ With `skip: workflows`, a skipped workflow is replaced by a green `skip` job so 
 }
 ```
 
-### Token requirements
-
-Creating check runs requires the `GITHUB_CHECKS_TOKEN` environment variable, typically injected via a CircleCI context. Classic GitHub personal access tokens **cannot** create check runs: the token must be a GitHub App installation token or a fine-grained PAT with `checks: write` permission on the repository. If the variable is absent the skip job logs a warning and still succeeds exactly as before — only the check run is omitted.
-
 ### `report-skip` subcommand
 
-The check-run posting and artifact writing is available as a standalone subcommand so custom skip paths (e.g. jobs that `circleci-agent step halt` on certain branches) can share the same naming convention and artifact schema:
+Custom skip paths (e.g. jobs that `circleci-agent step halt` on certain branches) can post their own skip indication:
 
 ```sh
 circletron report-skip --workflow my-workflow --reason halted-on-branch
 ```
 
-The reason (default `unaffected`) is reflected in the check-run name (`my-workflow (circletron: skipped — halted-on-branch)`), summary and the artifact's `status` field (`skipped-halted-on-branch`). The artifact is written to `/tmp/circletron/skip.json`; register it with `store_artifacts` to upload it. Repository owner/name and commit SHA are read from the built-in `CIRCLE_PROJECT_USERNAME`, `CIRCLE_PROJECT_REPONAME` and `CIRCLE_SHA1` environment variables; pipeline id/number are read from `CIRCLETRON_PIPELINE_ID`/`CIRCLETRON_PIPELINE_NUMBER` if set.
+Unlike `skip: check-runs` this variant never collides with required check names: the check run is named `my-workflow (circletron: skipped — halted-on-branch)` with conclusion `skipped`, and a per-job artifact with a `status` of `skipped-halted-on-branch` is written to `/tmp/circletron/skip.json` (register it with `store_artifacts` to upload it). Repository owner/name and commit SHA are read from the built-in `CIRCLE_PROJECT_USERNAME`, `CIRCLE_PROJECT_REPONAME` and `CIRCLE_SHA1` environment variables; pipeline id/number are read from `CIRCLETRON_PIPELINE_ID`/`CIRCLETRON_PIPELINE_NUMBER` if set.

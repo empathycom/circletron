@@ -10,10 +10,13 @@ import { getLastSuccessfulBuildRevisionOnBranch } from './circle'
 import { requireEnv } from './env'
 import { getBranchpointCommitAndTargetBranch } from './git'
 import { spawnGetStdout } from './command'
-import { DEFAULT_SKIP_ARTIFACT_PATH, runReportSkipCli } from './report-skip'
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { version: CIRCLETRON_VERSION } = require('../package.json')
+import {
+  GITHUB_CHECKS_TOKEN_VAR,
+  getCheckRunTarget,
+  postSkippedCheckRun,
+  runReportSkipCli,
+  writeSkipsArtifact,
+} from './report-skip'
 
 const CONTINUATION_API_URL = `https://circleci.com/api/v2/pipeline/continue`
 const DEFAULT_CONFIG_VERSION = 2.1
@@ -38,7 +41,9 @@ interface CircletronConfig {
   runOnlyChangedOnTargetBranches: boolean
   targetBranchesRegex: RegExp
   passTargetBranch: boolean
-  skip: 'workflows' | 'jobs'
+  skip: 'workflows' | 'jobs' | 'check-runs'
+  // required-check name per workflow, when it differs from the workflow name
+  checkNames: Record<string, string>
 }
 
 async function getPackages(): Promise<Package[]> {
@@ -165,6 +170,10 @@ const getTriggerPackages = async (
   }
 }
 
+const SKIP_WORKFLOW = {
+  jobs: ['skip'],
+}
+
 const SKIP_JOB = {
   docker: [{ image: 'busybox:stable' }],
   steps: [
@@ -177,43 +186,16 @@ const SKIP_JOB = {
   ],
 }
 
-const SKIP_JOB_WITH_INDICATION = {
-  parameters: {
-    'workflow-name': {
-      type: 'string',
-      default: '',
-    },
-  },
-  docker: [{ image: `circletron/circletron:${CIRCLETRON_VERSION}` }],
-  environment: {
-    CIRCLETRON_PIPELINE_ID: '<< pipeline.id >>',
-    CIRCLETRON_PIPELINE_NUMBER: '<< pipeline.number >>',
-  },
-  steps: [
-    {
-      run: {
-        name: 'Jobs not required',
-        command:
-          'circletron report-skip --workflow "<< parameters.workflow-name >>" --reason unaffected',
-      },
-    },
-    {
-      store_artifacts: {
-        path: DEFAULT_SKIP_ARTIFACT_PATH,
-        destination: 'circletron/skip.json',
-      },
-    },
-  ],
-}
-
-const buildSkipWorkflowWithIndication = (workflowName: string): Record<string, unknown> => ({
-  jobs: [{ skip: { 'workflow-name': workflowName } }],
-})
+const getSkippedWorkflows = (packages: Package[], triggerPackages: Set<string>): string[] =>
+  packages
+    .filter((pkg) => !triggerPackages.has(pkg.name))
+    .flatMap((pkg) => Object.keys(pkg.circleConfig.workflows ?? {}))
 
 export async function buildConfiguration(
   packages: Package[],
   triggerPackages: Set<string>,
   circletronConfig: CircletronConfig,
+  fallbackWorkflows: Set<string> = new Set(),
 ): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let config: Record<string, any> = {}
@@ -280,20 +262,32 @@ export async function buildConfiguration(
         }
       }
     }
-    if (circletronConfig.skip === 'workflows') {
-      config.jobs['skip'] = SKIP_JOB_WITH_INDICATION
+    if (circletronConfig.skip === 'workflows' || circletronConfig.skip === 'check-runs') {
+      if (circletronConfig.skip === 'workflows') {
+        config.jobs['skip'] = SKIP_JOB
+      }
       if (triggerPackages.has(pkg.name)) {
         mergeObject('workflows', circleConfig)
-      } else {
-        if (circleConfig.workflows) {
-          Object.keys(circleConfig.workflows).forEach((workflowName) => {
-            config.workflows[workflowName] = buildSkipWorkflowWithIndication(workflowName)
-          })
-        }
+      } else if (circleConfig.workflows) {
+        // in check-runs mode a skipped workflow is omitted entirely; it only
+        // degrades to a skip workflow when its check run could not be posted
+        Object.keys(circleConfig.workflows).forEach((workflowName) => {
+          if (circletronConfig.skip === 'workflows' || fallbackWorkflows.has(workflowName)) {
+            config.jobs['skip'] = SKIP_JOB
+            config.workflows[workflowName] = SKIP_WORKFLOW
+          }
+        })
       }
     } else {
       mergeObject('workflows', circleConfig)
     }
+  }
+
+  // the continuation API rejects a configuration without workflows, so when
+  // everything is skipped run a single no-op skip workflow
+  if (Object.keys(config.workflows).length === 0) {
+    config.jobs['skip'] = SKIP_JOB
+    config.workflows['skip'] = SKIP_WORKFLOW
   }
   return yamlStringify(config)
 }
@@ -304,6 +298,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     runOnlyChangedOnTargetBranches?: boolean
     passTargetBranch?: boolean
     skip?: string
+    checkNames?: Record<string, string>
   } = {}
   try {
     rawConfig = yamlParse((await pReadFile(pathJoin('.circleci', 'circletron.yml'))).toString())
@@ -312,8 +307,8 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
   }
 
   const skip: string = rawConfig.skip ?? DEFAULT_SKIP
-  if (skip !== 'jobs' && skip !== 'workflows') {
-    throw new Error(`Skip must be either 'jobs' or 'workflows' - got ${skip}`)
+  if (skip !== 'jobs' && skip !== 'workflows' && skip !== 'check-runs') {
+    throw new Error(`Skip must be 'jobs', 'workflows' or 'check-runs' - got ${skip}`)
   }
 
   return {
@@ -324,6 +319,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
       : DEFAULT_TARGET_BRANCHES_REGEX,
     passTargetBranch: Boolean(rawConfig.passTargetBranch),
     skip: skip,
+    checkNames: rawConfig.checkNames ?? {},
   }
 }
 
@@ -344,10 +340,40 @@ export async function triggerCiJobs(
     scheduleJobToRun,
   )
 
+  const skippedWorkflows = getSkippedWorkflows(filteredPackages, triggerPackages)
+  // one artifact per pipeline listing every skipped workflow, uploaded via the
+  // orb's store_artifacts step
+  await writeSkipsArtifact(skippedWorkflows)
+
+  let fallbackWorkflows = new Set<string>()
+  if (circletronConfig.skip === 'check-runs' && skippedWorkflows.length > 0) {
+    const target = getCheckRunTarget()
+    if (!target) {
+      console.warn(
+        `Warning: ${GITHUB_CHECKS_TOKEN_VAR} or the CircleCI project environment variables ` +
+          'are not set, falling back to skip workflows',
+      )
+      fallbackWorkflows = new Set(skippedWorkflows)
+    } else {
+      const results = await Promise.all(
+        skippedWorkflows.map(async (workflow) => ({
+          workflow,
+          posted: await postSkippedCheckRun(
+            target,
+            circletronConfig.checkNames[workflow] ?? workflow,
+            workflow,
+          ),
+        })),
+      )
+      fallbackWorkflows = new Set(results.filter((r) => !r.posted).map((r) => r.workflow))
+    }
+  }
+
   const configuration = await buildConfiguration(
     filteredPackages,
     triggerPackages,
     circletronConfig,
+    fallbackWorkflows,
   )
   const body: {
     'continuation-key': string

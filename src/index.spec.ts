@@ -2,19 +2,22 @@ import { parse as yamlParse } from 'yaml'
 
 import { buildConfiguration } from './index'
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { version } = require('../package.json')
-
 // derive the (internal) parameter shapes from the function signature instead of
 // expanding the package's public type exports
 type Packages = Parameters<typeof buildConfiguration>[0]
 type CircletronConfig = Parameters<typeof buildConfiguration>[2]
+
+const SKIP_JOB = {
+  docker: [{ image: 'busybox:stable' }],
+  steps: [{ run: { name: 'Jobs not required', command: 'echo "Jobs not required"' } }],
+}
 
 const baseConfig: CircletronConfig = {
   runOnlyChangedOnTargetBranches: true,
   targetBranchesRegex: /^main$/,
   passTargetBranch: false,
   skip: 'workflows',
+  checkNames: {},
 }
 
 const makePackages = (): Packages => [
@@ -43,7 +46,7 @@ const makePackages = (): Packages => [
 ]
 
 describe('buildConfiguration with skip: workflows', () => {
-  it('generates a skip job that reports skips', async () => {
+  it('replaces skipped workflows with the busybox skip workflow', async () => {
     const output = await buildConfiguration(makePackages(), new Set(['pkg-a']), baseConfig)
     const config = yamlParse(output)
 
@@ -51,35 +54,8 @@ describe('buildConfiguration with skip: workflows', () => {
     expect(config.workflows['workflow-a']).toEqual({ jobs: ['test-a'] })
     expect(config.jobs['test-a']).toEqual({ docker: [{ image: 'node:16' }], steps: ['checkout'] })
 
-    // the skipped workflow passes its name to the skip job
-    expect(config.workflows['workflow-b']).toEqual({
-      jobs: [{ skip: { 'workflow-name': 'workflow-b' } }],
-    })
-
-    const skipJob = config.jobs.skip
-    expect(skipJob.parameters).toEqual({
-      'workflow-name': { type: 'string', default: '' },
-    })
-    expect(skipJob.docker).toEqual([{ image: `circletron/circletron:${version}` }])
-    expect(skipJob.environment).toEqual({
-      CIRCLETRON_PIPELINE_ID: '<< pipeline.id >>',
-      CIRCLETRON_PIPELINE_NUMBER: '<< pipeline.number >>',
-    })
-    expect(skipJob.steps).toEqual([
-      {
-        run: {
-          name: 'Jobs not required',
-          command:
-            'circletron report-skip --workflow "<< parameters.workflow-name >>" --reason unaffected',
-        },
-      },
-      {
-        store_artifacts: {
-          path: '/tmp/circletron/skip.json',
-          destination: 'circletron/skip.json',
-        },
-      },
-    ])
+    expect(config.workflows['workflow-b']).toEqual({ jobs: ['skip'] })
+    expect(config.jobs.skip).toEqual(SKIP_JOB)
   })
 
   it('does not touch non-skipped workflows', async () => {
@@ -91,5 +67,41 @@ describe('buildConfiguration with skip: workflows', () => {
     const config = yamlParse(output)
     expect(config.workflows['workflow-a']).toEqual({ jobs: ['test-a'] })
     expect(config.workflows['workflow-b']).toEqual({ jobs: ['test-b'] })
+  })
+})
+
+describe('buildConfiguration with skip: check-runs', () => {
+  const checkRunsConfig: CircletronConfig = { ...baseConfig, skip: 'check-runs' }
+
+  it('omits skipped workflows and their jobs entirely', async () => {
+    const output = await buildConfiguration(makePackages(), new Set(['pkg-a']), checkRunsConfig)
+    const config = yamlParse(output)
+
+    expect(config.workflows).toEqual({ 'workflow-a': { jobs: ['test-a'] } })
+    expect(config.jobs).toEqual({
+      'test-a': { docker: [{ image: 'node:16' }], steps: ['checkout'] },
+    })
+  })
+
+  it('degrades workflows whose check run could not be posted to skip workflows', async () => {
+    const output = await buildConfiguration(
+      makePackages(),
+      new Set(['pkg-a']),
+      checkRunsConfig,
+      new Set(['workflow-b']),
+    )
+    const config = yamlParse(output)
+
+    expect(config.workflows['workflow-a']).toEqual({ jobs: ['test-a'] })
+    expect(config.workflows['workflow-b']).toEqual({ jobs: ['skip'] })
+    expect(config.jobs.skip).toEqual(SKIP_JOB)
+  })
+
+  it('emits a single no-op skip workflow when everything is skipped', async () => {
+    const output = await buildConfiguration(makePackages(), new Set(), checkRunsConfig)
+    const config = yamlParse(output)
+
+    expect(config.workflows).toEqual({ skip: { jobs: ['skip'] } })
+    expect(config.jobs).toEqual({ skip: SKIP_JOB })
   })
 })

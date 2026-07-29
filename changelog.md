@@ -1,5 +1,13 @@
 # Changelog
 
+- 2026/07/29 - 3.0.14
+
+  - In `skip: check-runs` mode, when posting the `skipped` check run fails
+    (e.g. the token is a personal access token, which cannot use the Checks
+    API), fall back to posting a classic commit status with state `success`
+    under the same required-check context before degrading to a skip
+    workflow. Requires branch protection checks that accept any source.
+
 - 2026/07/29 - 3.0.13
 
   - Pin `lerna` to 8.2.4 in the Docker image. The unpinned `npm install -g lerna`

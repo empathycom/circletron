@@ -1,15 +1,19 @@
+import { createVerify, generateKeyPairSync } from 'crypto'
 import { readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import axios from 'axios'
 
 import {
+  buildAppJwt,
   buildCheckRunPayload,
   buildSkipArtifact,
   getCheckRunTarget,
+  mintAppInstallationToken,
   postSkippedCheckRun,
   postSkippedCommitStatus,
   reportSkip,
+  resolveCheckRunTarget,
   writeSkipsArtifact,
 } from './report-skip'
 
@@ -113,6 +117,130 @@ describe('postSkippedCheckRun', () => {
     } finally {
       warnSpy.mockRestore()
     }
+  })
+})
+
+const testKeyPair = generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+})
+
+const fromBase64url = (part: string): Buffer =>
+  Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+
+describe('buildAppJwt', () => {
+  it('builds a valid RS256 JWT identifying the app', () => {
+    const jwt = buildAppJwt('12345', testKeyPair.privateKey, 1_700_000_000)
+    const [header, payload, signature] = jwt.split('.')
+
+    expect(JSON.parse(fromBase64url(header).toString())).toEqual({ alg: 'RS256', typ: 'JWT' })
+    expect(JSON.parse(fromBase64url(payload).toString())).toEqual({
+      iat: 1_700_000_000 - 60,
+      exp: 1_700_000_000 + 540,
+      iss: '12345',
+    })
+    expect(
+      createVerify('RSA-SHA256')
+        .update(`${header}.${payload}`)
+        .verify(testKeyPair.publicKey, fromBase64url(signature)),
+    ).toBe(true)
+  })
+
+  it('accepts a base64-encoded private key', () => {
+    const encoded = Buffer.from(testKeyPair.privateKey).toString('base64')
+    expect(buildAppJwt('12345', encoded)).toEqual(expect.stringMatching(/^[\w-]+\.[\w-]+\./))
+  })
+})
+
+describe('mintAppInstallationToken', () => {
+  const appEnv = {
+    GITHUB_CHECKS_APP_ID: '12345',
+    GITHUB_CHECKS_APP_PRIVATE_KEY: testKeyPair.privateKey,
+  }
+
+  beforeEach(() => {
+    mockedAxios.get.mockReset()
+    mockedAxios.post.mockReset()
+  })
+
+  it('resolves the repo installation and mints an access token', async () => {
+    mockedAxios.get.mockResolvedValue({ data: { id: 99 } })
+    mockedAxios.post.mockResolvedValue({ data: { token: 'installation-token' } })
+
+    await expect(mintAppInstallationToken('empathycom', 'circletron', appEnv)).resolves.toEqual(
+      'installation-token',
+    )
+
+    expect(mockedAxios.get).toHaveBeenCalledWith(
+      'https://api.github.com/repos/empathycom/circletron/installation',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Bearer /) }),
+      }),
+    )
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      'https://api.github.com/app/installations/99/access_tokens',
+      {},
+      expect.anything(),
+    )
+  })
+
+  it('returns undefined when the app credentials are not configured', async () => {
+    await expect(
+      mintAppInstallationToken('empathycom', 'circletron', {}),
+    ).resolves.toBeUndefined()
+    expect(mockedAxios.get).not.toHaveBeenCalled()
+  })
+
+  it('returns undefined and warns when minting fails', async () => {
+    mockedAxios.get.mockRejectedValue(new Error('boom'))
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+    try {
+      await expect(
+        mintAppInstallationToken('empathycom', 'circletron', appEnv),
+      ).resolves.toBeUndefined()
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('failed to mint GitHub App installation token'),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('resolveCheckRunTarget', () => {
+  beforeEach(() => {
+    mockedAxios.get.mockReset()
+    mockedAxios.post.mockReset()
+  })
+
+  it('prefers an explicit GITHUB_CHECKS_TOKEN', async () => {
+    await expect(
+      resolveCheckRunTarget({ ...testEnv, GITHUB_CHECKS_TOKEN: 'gh-token' }),
+    ).resolves.toEqual({
+      owner: 'empathycom',
+      repo: 'circletron',
+      headSha: 'abc123',
+      token: 'gh-token',
+    })
+    expect(mockedAxios.get).not.toHaveBeenCalled()
+  })
+
+  it('mints an installation token from the app credentials', async () => {
+    mockedAxios.get.mockResolvedValue({ data: { id: 99 } })
+    mockedAxios.post.mockResolvedValue({ data: { token: 'installation-token' } })
+
+    await expect(
+      resolveCheckRunTarget({
+        ...testEnv,
+        GITHUB_CHECKS_APP_ID: '12345',
+        GITHUB_CHECKS_APP_PRIVATE_KEY: testKeyPair.privateKey,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ token: 'installation-token' }))
+  })
+
+  it('resolves undefined without credentials', async () => {
+    await expect(resolveCheckRunTarget(testEnv)).resolves.toBeUndefined()
   })
 })
 

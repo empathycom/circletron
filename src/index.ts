@@ -11,10 +11,12 @@ import { requireEnv } from './env'
 import { getBranchpointCommitAndTargetBranch } from './git'
 import { spawnGetStdout } from './command'
 import {
+  GITHUB_CHECKS_APP_ID_VAR,
+  GITHUB_CHECKS_APP_PRIVATE_KEY_VAR,
   GITHUB_CHECKS_TOKEN_VAR,
-  getCheckRunTarget,
   postSkippedCheckRun,
   postSkippedCommitStatus,
+  resolveCheckRunTarget,
   runReportSkipCli,
   writeSkipsArtifact,
 } from './report-skip'
@@ -348,11 +350,12 @@ export async function triggerCiJobs(
 
   let fallbackWorkflows = new Set<string>()
   if (circletronConfig.skip === 'check-runs' && skippedWorkflows.length > 0) {
-    const target = getCheckRunTarget()
+    const target = await resolveCheckRunTarget()
     if (!target) {
       console.warn(
-        `Warning: ${GITHUB_CHECKS_TOKEN_VAR} or the CircleCI project environment variables ` +
-          'are not set, falling back to skip workflows',
+        `Warning: no GitHub credentials (${GITHUB_CHECKS_TOKEN_VAR}, or ` +
+          `${GITHUB_CHECKS_APP_ID_VAR} with ${GITHUB_CHECKS_APP_PRIVATE_KEY_VAR}) or the ` +
+          'CircleCI project environment variables are not set, falling back to skip workflows',
       )
       fallbackWorkflows = new Set(skippedWorkflows)
     } else {

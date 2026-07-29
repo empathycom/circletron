@@ -1,3 +1,4 @@
+import { createSign } from 'crypto'
 import { mkdir, writeFile } from 'fs'
 import { promisify } from 'util'
 import { dirname } from 'path'
@@ -9,6 +10,8 @@ const pWriteFile = promisify(writeFile)
 const GITHUB_API_URL = 'https://api.github.com'
 
 export const GITHUB_CHECKS_TOKEN_VAR = 'GITHUB_CHECKS_TOKEN'
+export const GITHUB_CHECKS_APP_ID_VAR = 'GITHUB_CHECKS_APP_ID'
+export const GITHUB_CHECKS_APP_PRIVATE_KEY_VAR = 'GITHUB_CHECKS_APP_PRIVATE_KEY'
 export const DEFAULT_SKIP_ARTIFACT_PATH = '/tmp/circletron/skip.json'
 export const DEFAULT_SKIPS_ARTIFACT_PATH = '/tmp/circletron/skips.json'
 
@@ -51,6 +54,99 @@ export function getCheckRunTarget(
   const repo = env.CIRCLE_PROJECT_REPONAME
   const headSha = env.CIRCLE_SHA1
   if (!token || !owner || !repo || !headSha) {
+    return undefined
+  }
+  return { owner, repo, headSha, token }
+}
+
+const base64url = (data: string | Buffer): string =>
+  Buffer.from(data).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+
+/**
+ * The private key may be provided as a raw PEM (possibly with `\n` escape
+ * sequences instead of newlines) or base64-encoded.
+ */
+const normalizePrivateKey = (key: string): string => {
+  if (key.includes('-----BEGIN')) {
+    return key.replace(/\\n/g, '\n')
+  }
+  return Buffer.from(key, 'base64').toString()
+}
+
+/** Build a short-lived RS256 JWT identifying the GitHub App. */
+export function buildAppJwt(
+  appId: string,
+  privateKey: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): string {
+  const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+  // 60s clock-drift allowance, 9 minute lifetime (GitHub's maximum is 10)
+  const payload = base64url(
+    JSON.stringify({ iat: nowSeconds - 60, exp: nowSeconds + 540, iss: appId }),
+  )
+  const signature = createSign('RSA-SHA256')
+    .update(`${header}.${payload}`)
+    .sign(normalizePrivateKey(privateKey))
+  return `${header}.${payload}.${base64url(signature)}`
+}
+
+/**
+ * Mint a GitHub App installation token from the app id and private key
+ * environment variables. Returns undefined when they are not configured or
+ * the token cannot be minted.
+ */
+export async function mintAppInstallationToken(
+  owner: string,
+  repo: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | undefined> {
+  const appId = env[GITHUB_CHECKS_APP_ID_VAR]
+  const privateKey = env[GITHUB_CHECKS_APP_PRIVATE_KEY_VAR]
+  if (!appId || !privateKey) {
+    return undefined
+  }
+
+  try {
+    const headers = {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${buildAppJwt(appId, privateKey)}`,
+    }
+    const installation = await axios.get<{ id: number }>(
+      `${GITHUB_API_URL}/repos/${owner}/${repo}/installation`,
+      { headers },
+    )
+    const accessToken = await axios.post<{ token: string }>(
+      `${GITHUB_API_URL}/app/installations/${installation.data.id}/access_tokens`,
+      {},
+      { headers },
+    )
+    console.log(`Minted GitHub App installation token for ${owner}/${repo}`)
+    return accessToken.data.token
+  } catch (e) {
+    console.warn(
+      `Warning: failed to mint GitHub App installation token: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    )
+    return undefined
+  }
+}
+
+/**
+ * Resolve the check run target: an explicit GITHUB_CHECKS_TOKEN wins,
+ * otherwise a token is minted from the GitHub App credentials.
+ */
+export async function resolveCheckRunTarget(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<CheckRunTarget | undefined> {
+  const owner = env.CIRCLE_PROJECT_USERNAME
+  const repo = env.CIRCLE_PROJECT_REPONAME
+  const headSha = env.CIRCLE_SHA1
+  if (!owner || !repo || !headSha) {
+    return undefined
+  }
+  const token = env[GITHUB_CHECKS_TOKEN_VAR] ?? (await mintAppInstallationToken(owner, repo, env))
+  if (!token) {
     return undefined
   }
   return { owner, repo, headSha, token }
@@ -217,13 +313,12 @@ export async function reportSkip(
     )
   }
 
-  const target = getCheckRunTarget(env)
+  const target = await resolveCheckRunTarget(env)
   if (!target) {
     console.warn(
-      `Warning: ${GITHUB_CHECKS_TOKEN_VAR}, CIRCLE_PROJECT_USERNAME, CIRCLE_PROJECT_REPONAME ` +
-        'or CIRCLE_SHA1 is not set, skipping GitHub check run creation. Provide a GitHub App ' +
-        'installation token or fine-grained PAT with checks: write permission to publish a ' +
-        '"skipped" check run for skipped workflows.',
+      `Warning: no GitHub credentials (${GITHUB_CHECKS_TOKEN_VAR}, or ` +
+        `${GITHUB_CHECKS_APP_ID_VAR} with ${GITHUB_CHECKS_APP_PRIVATE_KEY_VAR}) or the CircleCI ` +
+        'project environment variables are not set, skipping GitHub check run creation.',
     )
     return
   }

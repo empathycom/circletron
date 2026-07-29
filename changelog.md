@@ -1,5 +1,13 @@
 # Changelog
 
+- 2026/07/29 - 3.0.15
+
+  - Mint a GitHub App installation token when `GITHUB_CHECKS_APP_ID` and
+    `GITHUB_CHECKS_APP_PRIVATE_KEY` are set (and `GITHUB_CHECKS_TOKEN` is
+    not), so skipped workflows are reported as proper check runs with
+    conclusion `skipped`. The private key may be provided as a raw PEM or
+    base64-encoded.
+
 - 2026/07/29 - 3.0.14
 
   - In `skip: check-runs` mode, when posting the `skipped` check run fails

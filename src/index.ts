@@ -14,6 +14,7 @@ import {
   GITHUB_CHECKS_TOKEN_VAR,
   getCheckRunTarget,
   postSkippedCheckRun,
+  postSkippedCommitStatus,
   runReportSkipCli,
   writeSkipsArtifact,
 } from './report-skip'
@@ -356,14 +357,15 @@ export async function triggerCiJobs(
       fallbackWorkflows = new Set(skippedWorkflows)
     } else {
       const results = await Promise.all(
-        skippedWorkflows.map(async (workflow) => ({
-          workflow,
-          posted: await postSkippedCheckRun(
-            target,
-            circletronConfig.checkNames[workflow] ?? workflow,
-            workflow,
-          ),
-        })),
+        skippedWorkflows.map(async (workflow) => {
+          const checkName = circletronConfig.checkNames[workflow] ?? workflow
+          // tokens without Checks API access (e.g. personal access tokens)
+          // fall back to a classic commit status under the same context
+          const posted =
+            (await postSkippedCheckRun(target, checkName, workflow)) ||
+            (await postSkippedCommitStatus(target, checkName, workflow))
+          return { workflow, posted }
+        }),
       )
       fallbackWorkflows = new Set(results.filter((r) => !r.posted).map((r) => r.workflow))
     }

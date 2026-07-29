@@ -8,6 +8,7 @@ import {
   buildSkipArtifact,
   getCheckRunTarget,
   postSkippedCheckRun,
+  postSkippedCommitStatus,
   reportSkip,
   writeSkipsArtifact,
 } from './report-skip'
@@ -108,6 +109,51 @@ describe('postSkippedCheckRun', () => {
       await expect(postSkippedCheckRun(target, 'my-workflow', 'my-workflow')).resolves.toBe(false)
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining("failed to create check run 'my-workflow'"),
+      )
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('postSkippedCommitStatus', () => {
+  const target = { owner: 'empathycom', repo: 'circletron', headSha: 'abc123', token: 'gh-token' }
+
+  beforeEach(() => {
+    mockedAxios.post.mockReset()
+    mockedAxios.post.mockResolvedValue({ data: {} })
+  })
+
+  it('posts a successful commit status under the exact required check context', async () => {
+    await expect(
+      postSkippedCommitStatus(target, 'ci/circleci: my-workflow', 'my-workflow'),
+    ).resolves.toBe(true)
+
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      'https://api.github.com/repos/empathycom/circletron/statuses/abc123',
+      {
+        state: 'success',
+        context: 'ci/circleci: my-workflow',
+        description: 'Skipped by circletron: workflow my-workflow unaffected',
+      },
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: 'Bearer gh-token',
+        },
+      },
+    )
+  })
+
+  it('returns false and warns when the request fails', async () => {
+    mockedAxios.post.mockRejectedValue(new Error('boom'))
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation()
+    try {
+      await expect(postSkippedCommitStatus(target, 'my-workflow', 'my-workflow')).resolves.toBe(
+        false,
+      )
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("failed to create commit status 'my-workflow'"),
       )
     } finally {
       warnSpy.mockRestore()

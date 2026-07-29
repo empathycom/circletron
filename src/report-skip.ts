@@ -66,6 +66,44 @@ async function postCheckRun(target: CheckRunTarget, payload: CheckRunPayload): P
 }
 
 /**
+ * Fallback for tokens that cannot use the Checks API (e.g. personal access
+ * tokens): post a classic commit status under the required check's context.
+ * Statuses have no `skipped` state so it reports `success` with a
+ * description marking the skip.
+ */
+export async function postSkippedCommitStatus(
+  target: CheckRunTarget,
+  checkName: string,
+  workflow: string,
+): Promise<boolean> {
+  try {
+    await axios.post(
+      `${GITHUB_API_URL}/repos/${target.owner}/${target.repo}/statuses/${target.headSha}`,
+      {
+        state: 'success',
+        context: checkName,
+        description: `Skipped by circletron: workflow ${workflow} unaffected`.slice(0, 140),
+      },
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${target.token}`,
+        },
+      },
+    )
+    console.log(`Created skipped commit status '${checkName}'`)
+    return true
+  } catch (e) {
+    console.warn(
+      `Warning: failed to create commit status '${checkName}': ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    )
+    return false
+  }
+}
+
+/**
  * Unlike buildCheckRunPayload the name must exactly match the required check
  * it stands in for: branch protection accepts a `skipped` conclusion as
  * passing, so no skip workflow has to run at all.

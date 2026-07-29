@@ -6,13 +6,19 @@ description: >
 executors:
   circletron-executor:
     docker:
-      - image: circletron/circletron:3.0.5
+      - image: circletron/circletron:3.1.0
 
 jobs:
   trigger-jobs:
     executor: circletron-executor
+    environment:
+      CIRCLETRON_PIPELINE_ID: '<< pipeline.id >>'
+      CIRCLETRON_PIPELINE_NUMBER: '<< pipeline.number >>'
     steps:
       - checkout
       - run:
           name: trigger jobs
           command: circletron
+      - store_artifacts:
+          path: /tmp/circletron/skips.json
+          destination: circletron/skips.json

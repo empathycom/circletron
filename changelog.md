@@ -1,5 +1,12 @@
 # Changelog
 
+- 2026/07/28 - 3.1.0
+
+  - Add opt-in `skip: check-runs` mode: skipped workflows are omitted from the generated configuration entirely and the setup job posts a GitHub check run per skipped workflow, named like the required check with conclusion `skipped`, so branch protection stays satisfied without running any skip jobs. Workflows whose check run cannot be posted fall back to the green `skip` workflow.
+  - Add `checkNames` option to map workflow names to required check names.
+  - The setup job now uploads a `circletron/skips.json` artifact listing every skipped workflow in the pipeline.
+  - Add `report-skip` subcommand so custom skip paths can publish a distinctly-named `skipped` check run and skip artifact.
+
 - 2021/02/03 - 3.0.5
 
   - Fix bug that occurs when jobs with parameters are skipped.

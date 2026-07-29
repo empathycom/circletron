@@ -41,9 +41,6 @@ jobs:
 
           echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -58,6 +55,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          # amd64 only: CircleCI executors are amd64 and the arm64 build
+          # SIGILLs under QEMU emulation with node:20 (illegal instruction)
+          platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}

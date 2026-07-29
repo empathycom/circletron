@@ -1,6 +1,13 @@
 # Changelog
 
-- 2026/07/28 - 3.1.0
+- 2026/07/29 - 3.0.13
+
+  - Pin `lerna` to 8.2.4 in the Docker image. The unpinned `npm install -g lerna`
+    started pulling lerna 9, which requires Node 18+ and crashes on the image's
+    Node 16 base, breaking the `trigger-jobs` setup job.
+  - Upgrade the Docker base image from `node:16-alpine3.13` to `node:20-alpine`.
+
+- 2026/07/28 - 3.0.12
 
   - Add opt-in `skip: check-runs` mode: skipped workflows are omitted from the generated configuration entirely and the setup job posts a GitHub check run per skipped workflow, named like the required check with conclusion `skipped`, so branch protection stays satisfied without running any skip jobs. Workflows whose check run cannot be posted fall back to the green `skip` workflow.
   - Add `checkNames` option to map workflow names to required check names.

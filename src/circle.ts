@@ -54,6 +54,16 @@ interface CircleWorkflows {
   items: CircleWorkflowItem[]
 }
 
+const CHANGE_BASE_WORKFLOW_STATUSES = [
+  CircleWorkflowStatus.Success,
+  CircleWorkflowStatus.OnHold,
+  CircleWorkflowStatus.Running,
+]
+
+export const hasChangeBaseWorkflows = (statuses: CircleWorkflowStatus[]): boolean =>
+  statuses.length > 0 &&
+  statuses.every((status) => CHANGE_BASE_WORKFLOW_STATUSES.includes(status))
+
 async function find<I>(
   items: I[],
   asyncCallback: (input: I) => Promise<boolean>,
@@ -67,10 +77,11 @@ async function find<I>(
 }
 
 /**
- * This method determines, for the current branch, the commit hash of the last
- * build executed within Circle CI, by calling the API.
+ * Determines, for the current branch, the commit hash to diff against: the most
+ * recent commit whose pipeline has not failed. A pipeline still in flight counts
+ * — it already builds everything its own commit changed.
  *
- * @returns last commit built in Circle CI on the current branch, or undefined
+ * @returns the commit to look for changes since, or undefined
  */
 export async function getLastSuccessfulBuildRevisionOnBranch(
   branch: string,
@@ -100,24 +111,32 @@ export async function getLastSuccessfulBuildRevisionOnBranch(
         },
       )
 
-      // for each pipeline, fetch the workflows and find the first one where all the workflows have a
-      // 'success' or 'on hold' status.
-      const lastSuccessfulBuild = await find(pipelineData.items, async (item) => {
-        if (item.state === CirclePipelineState.Created) {
-          const { data: workflowData } = await axios.get<CircleWorkflows>(
-            `${CIRCLE_API_URL}/pipeline/${item.id}/workflow`,
-            { headers },
-          )
+      const currentPipelineId = process.env.CIRCLETRON_PIPELINE_ID
+      const currentRevision = process.env.CIRCLE_SHA1
 
-          return workflowData.items.every((item) =>
-            [CircleWorkflowStatus.Success, CircleWorkflowStatus.OnHold].includes(item.status),
-          )
-        } else {
+      const changeBaseBuild = await find(pipelineData.items, async (item) => {
+        if (item.id === currentPipelineId || item.vcs.revision === currentRevision) {
           return false
         }
+
+        if (item.state === CirclePipelineState.Errored) {
+          return false
+        }
+
+        // no workflows to consult until the setup job continues the pipeline
+        if (item.state !== CirclePipelineState.Created) {
+          return true
+        }
+
+        const { data: workflowData } = await axios.get<CircleWorkflows>(
+          `${CIRCLE_API_URL}/pipeline/${item.id}/workflow`,
+          { headers },
+        )
+
+        return hasChangeBaseWorkflows(workflowData.items.map((workflow) => workflow.status))
       })
 
-      return lastSuccessfulBuild?.vcs.revision
+      return changeBaseBuild?.vcs.revision
     }
   } catch (e) {
     console.log(`Failed to call Circle API v2 with error: ${e.message}`)

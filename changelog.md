@@ -1,5 +1,13 @@
 # Changelog
 
+- 2026/08/27 - 3.0.16
+
+  - On target branches, diff against the most recent commit whose pipeline has
+    not failed, instead of the most recent fully green one. A pipeline that is
+    still running was previously walked past, so back-to-back merges re-included
+    the in-flight commit's changes and rebuilt and redeployed its packages. The
+    pipeline circletron is running in is never used as its own change base.
+
 - 2026/07/29 - 3.0.15
 
   - Mint a GitHub App installation token when `GITHUB_CHECKS_APP_ID` and

@@ -47,6 +47,8 @@ interface CircletronConfig {
   skip: 'workflows' | 'jobs' | 'check-runs'
   // required-check name per workflow, when it differs from the workflow name
   checkNames: Record<string, string>
+  // CircleCI GitHub App integrations name checks `<workflow> - <definition id prefix>`
+  githubAppCheckNames: boolean
 }
 
 async function getPackages(): Promise<Package[]> {
@@ -189,6 +191,28 @@ const SKIP_JOB = {
   ],
 }
 
+export const PIPELINE_DEFINITION_ID_VAR = 'CIRCLETRON_PIPELINE_DEFINITION_ID'
+
+/**
+ * The name of the required check a skipped workflow stands in for, or
+ * undefined when it cannot be determined.
+ */
+export function getCheckName(
+  workflow: string,
+  circletronConfig: CircletronConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const explicitName = circletronConfig.checkNames[workflow]
+  if (explicitName) {
+    return explicitName
+  }
+  if (!circletronConfig.githubAppCheckNames) {
+    return workflow
+  }
+  const definitionId = env[PIPELINE_DEFINITION_ID_VAR]
+  return definitionId ? `${workflow} - ${definitionId.slice(0, 8)}` : undefined
+}
+
 const getSkippedWorkflows = (packages: Package[], triggerPackages: Set<string>): string[] =>
   packages
     .filter((pkg) => !triggerPackages.has(pkg.name))
@@ -302,6 +326,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     passTargetBranch?: boolean
     skip?: string
     checkNames?: Record<string, string>
+    githubAppCheckNames?: boolean
   } = {}
   try {
     rawConfig = yamlParse((await pReadFile(pathJoin('.circleci', 'circletron.yml'))).toString())
@@ -323,6 +348,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     passTargetBranch: Boolean(rawConfig.passTargetBranch),
     skip: skip,
     checkNames: rawConfig.checkNames ?? {},
+    githubAppCheckNames: Boolean(rawConfig.githubAppCheckNames),
   }
 }
 
@@ -361,7 +387,14 @@ export async function triggerCiJobs(
     } else {
       const results = await Promise.all(
         skippedWorkflows.map(async (workflow) => {
-          const checkName = circletronConfig.checkNames[workflow] ?? workflow
+          const checkName = getCheckName(workflow, circletronConfig)
+          if (!checkName) {
+            console.warn(
+              `Warning: githubAppCheckNames is enabled but ${PIPELINE_DEFINITION_ID_VAR} is ` +
+                `not set, falling back to a skip workflow for '${workflow}'`,
+            )
+            return { workflow, posted: false }
+          }
           // tokens without Checks API access (e.g. personal access tokens)
           // fall back to a classic commit status under the same context
           const posted =

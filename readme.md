@@ -93,6 +93,14 @@ checkNames:
   my-workflow: 'ci/circleci: my-workflow'
 ```
 
+Projects connected through the CircleCI GitHub App report each workflow's check as `<workflow> - <first 8 characters of the pipeline definition id>` (e.g. `my-workflow - 10c392d3`), so the required checks carry that suffix too. Set `githubAppCheckNames: true` to post skipped check runs under the same name; the id is read from `CIRCLETRON_PIPELINE_DEFINITION_ID`, which the orb sets from `<< pipeline.definition.id >>` (set it yourself when not using the orb). Explicit `checkNames` entries still win. When the id is missing the workflow falls back to the green `skip` workflow.
+
+```yml
+# .circleci/circletron.yml
+skip: check-runs
+githubAppCheckNames: true
+```
+
 Creating check runs requires the `GITHUB_CHECKS_TOKEN` environment variable on the setup job, typically injected via a CircleCI context:
 
 ```yml

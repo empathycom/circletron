@@ -1,5 +1,14 @@
 # Changelog
 
+- 2026/10/11 - 3.0.16
+
+  - Add opt-in `githubAppCheckNames` option. CircleCI GitHub App integrations
+    name check runs `<workflow> - <first 8 characters of the pipeline definition id>`,
+    so in `skip: check-runs` mode skipped check runs are posted under that name.
+    The id is read from `CIRCLETRON_PIPELINE_DEFINITION_ID`, which the orb now
+    sets from `<< pipeline.definition.id >>`; when it is missing the workflow
+    falls back to the green `skip` workflow.
+
 - 2026/07/29 - 3.0.15
 
   - Mint a GitHub App installation token when `GITHUB_CHECKS_APP_ID` and

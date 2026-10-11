@@ -6,7 +6,7 @@ description: >
 executors:
   circletron-executor:
     docker:
-      - image: ghcr.io/empathycom/circletron:3.0.15
+      - image: ghcr.io/empathycom/circletron:3.0.16
 
 jobs:
   trigger-jobs:
@@ -14,6 +14,7 @@ jobs:
     environment:
       CIRCLETRON_PIPELINE_ID: '<< pipeline.id >>'
       CIRCLETRON_PIPELINE_NUMBER: '<< pipeline.number >>'
+      CIRCLETRON_PIPELINE_DEFINITION_ID: '<< pipeline.definition.id >>'
     steps:
       - checkout
       - run:

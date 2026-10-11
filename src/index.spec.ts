@@ -1,6 +1,6 @@
 import { parse as yamlParse } from 'yaml'
 
-import { buildConfiguration } from './index'
+import { buildConfiguration, getCheckName } from './index'
 
 // derive the (internal) parameter shapes from the function signature instead of
 // expanding the package's public type exports
@@ -18,6 +18,7 @@ const baseConfig: CircletronConfig = {
   passTargetBranch: false,
   skip: 'workflows',
   checkNames: {},
+  githubAppCheckNames: false,
 }
 
 const makePackages = (): Packages => [
@@ -103,5 +104,34 @@ describe('buildConfiguration with skip: check-runs', () => {
 
     expect(config.workflows).toEqual({ skip: { jobs: ['skip'] } })
     expect(config.jobs).toEqual({ skip: SKIP_JOB })
+  })
+})
+
+describe('getCheckName', () => {
+  const definitionEnv = {
+    CIRCLETRON_PIPELINE_DEFINITION_ID: '10c392d3-1234-5678-9abc-def012345678',
+  }
+
+  it('uses the workflow name by default', () => {
+    expect(getCheckName('pkg-a', baseConfig, definitionEnv)).toBe('pkg-a')
+  })
+
+  it('suffixes the pipeline definition id prefix for GitHub App check names', () => {
+    const config: CircletronConfig = { ...baseConfig, githubAppCheckNames: true }
+    expect(getCheckName('pkg-a', config, definitionEnv)).toBe('pkg-a - 10c392d3')
+  })
+
+  it('prefers an explicit check name over the GitHub App format', () => {
+    const config: CircletronConfig = {
+      ...baseConfig,
+      githubAppCheckNames: true,
+      checkNames: { 'pkg-a': 'custom check' },
+    }
+    expect(getCheckName('pkg-a', config, definitionEnv)).toBe('custom check')
+  })
+
+  it('returns undefined for GitHub App check names without a pipeline definition id', () => {
+    const config: CircletronConfig = { ...baseConfig, githubAppCheckNames: true }
+    expect(getCheckName('pkg-a', config, {})).toBeUndefined()
   })
 })

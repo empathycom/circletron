@@ -42,11 +42,39 @@ describe('getLastSuccessfulBuildRevisionOnBranch', () => {
     })
   })
 
-  it('returns undefined when no run on the branch ended successfully', async () => {
-    mockedAxios.get.mockResolvedValueOnce({
-      data: { data: [run('failed', 'main', 'ended', 'failed')] },
+  it('follows the page cursor until a run on the branch ended successfully', async () => {
+    mockedAxios.get
+      .mockResolvedValueOnce({
+        data: { data: [run('pr', 'feature', 'ended', 'succeeded')], page: { next: 'cursor-2' } },
+      })
+      .mockResolvedValueOnce({
+        data: { data: [run('done', 'main', 'ended', 'succeeded')], page: { next: 'cursor-3' } },
+      })
+
+    await expect(getLastSuccessfulBuildRevisionOnBranch('main')).resolves.toBe('done')
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2)
+    expect(mockedAxios.get.mock.calls[1][1]?.params).toEqual({
+      'filter[project_id]': 'project-uuid',
+      'page[limit]': 20,
+      'page[cursor]': 'cursor-2',
+    })
+  })
+
+  it('stops after five pages', async () => {
+    mockedAxios.get.mockResolvedValue({
+      data: { data: [run('pr', 'feature', 'ended', 'succeeded')], page: { next: 'more' } },
     })
 
     await expect(getLastSuccessfulBuildRevisionOnBranch('main')).resolves.toBeUndefined()
+    expect(mockedAxios.get).toHaveBeenCalledTimes(5)
+  })
+
+  it('returns undefined when no run on the branch ended successfully', async () => {
+    mockedAxios.get.mockResolvedValueOnce({
+      data: { data: [run('failed', 'main', 'ended', 'failed')], page: { next: null } },
+    })
+
+    await expect(getLastSuccessfulBuildRevisionOnBranch('main')).resolves.toBeUndefined()
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1)
   })
 })

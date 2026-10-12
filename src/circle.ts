@@ -3,6 +3,7 @@ import axios from 'axios'
 import { requireEnv } from './env'
 
 const CIRCLE_API_URL = 'https://circleci.com/api/v2'
+const SCHEDULED_PIPELINE_TRIGGER = 'scheduled_pipeline'
 
 interface CirclePipelineError {
   type: string
@@ -22,11 +23,17 @@ enum CirclePipelineState {
   Pending = 'pending',
 }
 
+interface CirclePipelineTrigger {
+  type: string
+}
+
+// some pipelines, e.g. scheduled ones, carry no `vcs` block
 interface CirclePipelineItem {
   id: string
   errors: CirclePipelineError[]
   state: CirclePipelineState
-  vcs: CirclePipelineVCSInfo
+  trigger?: CirclePipelineTrigger
+  vcs?: CirclePipelineVCSInfo
 }
 
 interface CirclePipelines {
@@ -103,7 +110,13 @@ export async function getLastSuccessfulBuildRevisionOnBranch(
       // for each pipeline, fetch the workflows and find the first one where all the workflows have a
       // 'success' or 'on hold' status.
       const lastSuccessfulBuild = await find(pipelineData.items, async (item) => {
-        if (item.state === CirclePipelineState.Created) {
+        // scheduled pipelines only run the scheduled job's packages, so their success says
+        // nothing about the rest of the monorepo at that revision
+        if (
+          item.state === CirclePipelineState.Created &&
+          item.vcs?.revision &&
+          item.trigger?.type !== SCHEDULED_PIPELINE_TRIGGER
+        ) {
           const { data: workflowData } = await axios.get<CircleWorkflows>(
             `${CIRCLE_API_URL}/pipeline/${item.id}/workflow`,
             { headers },
@@ -117,7 +130,7 @@ export async function getLastSuccessfulBuildRevisionOnBranch(
         }
       })
 
-      return lastSuccessfulBuild?.vcs.revision
+      return lastSuccessfulBuild?.vcs?.revision
     }
   } catch (e) {
     console.log(`Failed to call Circle API v2 with error: ${e.message}`)

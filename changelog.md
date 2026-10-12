@@ -1,5 +1,13 @@
 # Changelog
 
+- 2026/10/12 - 3.0.17
+
+  - `runOnlyChangedOnTargetBranches`: when looking up the last successful
+    build, skip pipelines with no `vcs` revision (which crashed the lookup
+    with `Cannot read properties of undefined (reading 'revision')` and fell
+    back to running every pipeline) and scheduled pipelines, which only run
+    the scheduled job's packages.
+
 - 2026/10/11 - 3.0.16
 
   - Add opt-in `githubAppCheckNames` option. CircleCI GitHub App integrations

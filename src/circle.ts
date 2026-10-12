@@ -2,137 +2,83 @@ import axios from 'axios'
 
 import { requireEnv } from './env'
 
-const CIRCLE_API_URL = 'https://circleci.com/api/v2'
-const SCHEDULED_PIPELINE_TRIGGER = 'scheduled_pipeline'
+const CIRCLE_API_V3_URL = 'https://circleci.com/api/v3'
+const RUNS_PAGE_LIMIT = 20
+const MAX_RUN_PAGES = 5
 
-interface CirclePipelineError {
-  type: string
-  message: string
+interface CircleRunVcs {
+  branch?: string
+  revision?: string
 }
 
-interface CirclePipelineVCSInfo {
-  provider_name: 'GitHub' | 'Bitbucket'
-  revision: string
-}
-
-enum CirclePipelineState {
-  Created = 'created',
-  Errored = 'errored',
-  SetupPending = 'setup-pending',
-  Setup = 'setup',
-  Pending = 'pending',
-}
-
-interface CirclePipelineTrigger {
-  type: string
-}
-
-// some pipelines, e.g. scheduled ones, carry no `vcs` block
-interface CirclePipelineItem {
+interface CircleRun {
   id: string
-  errors: CirclePipelineError[]
-  state: CirclePipelineState
-  trigger?: CirclePipelineTrigger
-  vcs?: CirclePipelineVCSInfo
-}
-
-interface CirclePipelines {
-  items: CirclePipelineItem[]
-}
-
-enum CircleWorkflowStatus {
-  Success = 'success',
-  Running = 'running',
-  NotRun = 'not_run',
-  Failed = 'failed',
-  Error = 'error',
-  Failing = 'failing',
-  OnHold = 'on_hold',
-  Canceled = 'canceled',
-  Unauthorized = 'unauthorized',
-}
-
-interface CircleWorkflowItem {
-  id: string
-  status: CircleWorkflowStatus
-}
-
-interface CircleWorkflows {
-  items: CircleWorkflowItem[]
-}
-
-async function find<I>(
-  items: I[],
-  asyncCallback: (input: I) => Promise<boolean>,
-): Promise<I | null> {
-  for (const element of items) {
-    const shouldReturn: boolean = await asyncCallback(element)
-    if (shouldReturn) return element
+  attributes: {
+    phase: string
+    current_outcome?: string
   }
+  references?: {
+    event?: {
+      attributes?: {
+        type?: string
+        vcs?: CircleRunVcs
+      }
+    }
+  }
+}
 
-  return null
+interface CircleRuns {
+  data: CircleRun[]
+  page?: {
+    next?: string | null
+  }
+}
+
+// scheduled runs only build the scheduled job's packages, so their success says nothing about
+// the rest of the monorepo at that revision
+const isFullSuccessfulRunOnBranch = (run: CircleRun, branch: string): boolean => {
+  const event = run.references?.event?.attributes
+  return (
+    run.attributes.phase === 'ended' &&
+    run.attributes.current_outcome === 'succeeded' &&
+    event?.type !== 'schedule' &&
+    event?.vcs?.branch === branch &&
+    Boolean(event?.vcs?.revision)
+  )
 }
 
 /**
- * This method determines, for the current branch, the commit hash of the last
- * build executed within Circle CI, by calling the API.
+ * Finds the commit of the newest run on `branch` that ended successfully, using the runs API
+ * (v3). Unlike the v2 pipelines API it reports the revision for GitHub App pipelines as well as
+ * GitHub OAuth ones.
  *
- * @returns last commit built in Circle CI on the current branch, or undefined
+ * @returns last commit built successfully in Circle CI on the branch, or undefined
  */
 export async function getLastSuccessfulBuildRevisionOnBranch(
   branch: string,
 ): Promise<string | undefined> {
   try {
-    // the build URL is of the form https://circleci.com/{project_slug}/{build_number}
-    const buildUrl = requireEnv('CIRCLE_BUILD_URL')
-    const slugAndBuildNumber: string | undefined = /circleci\.com\/(.*\/.*\/.*)\//.exec(
-      buildUrl,
-    )?.[1]
+    const projectId = requireEnv('CIRCLE_PROJECT_ID')
+    const headers = { Authorization: `Bearer ${requireEnv('CIRCLE_TOKEN')}` }
 
-    // to access the API the user must specify an access token which is provided in the
-    // 'Circle-Token' header
-    const circleToken = requireEnv('CIRCLE_TOKEN')
-    const headers = { 'Circle-Token': circleToken }
-
-    if (slugAndBuildNumber) {
-      // call the API for pipelines, this does not reveal which workflows within the pipelines
-      // were successful or not
-      const { data: pipelineData } = await axios.get<CirclePipelines>(
-        `${CIRCLE_API_URL}/project/${slugAndBuildNumber}/pipeline`,
-        {
-          headers,
-          params: {
-            branch,
-          },
+    let cursor: string | undefined
+    for (let page = 0; page < MAX_RUN_PAGES; ++page) {
+      const { data: runs } = await axios.get<CircleRuns>(`${CIRCLE_API_V3_URL}/runs`, {
+        headers,
+        params: {
+          'filter[project_id]': projectId,
+          'page[limit]': RUNS_PAGE_LIMIT,
+          ...(cursor && { 'page[cursor]': cursor }),
         },
-      )
-
-      // for each pipeline, fetch the workflows and find the first one where all the workflows have a
-      // 'success' or 'on hold' status.
-      const lastSuccessfulBuild = await find(pipelineData.items, async (item) => {
-        // scheduled pipelines only run the scheduled job's packages, so their success says
-        // nothing about the rest of the monorepo at that revision
-        if (
-          item.state === CirclePipelineState.Created &&
-          item.vcs?.revision &&
-          item.trigger?.type !== SCHEDULED_PIPELINE_TRIGGER
-        ) {
-          const { data: workflowData } = await axios.get<CircleWorkflows>(
-            `${CIRCLE_API_URL}/pipeline/${item.id}/workflow`,
-            { headers },
-          )
-
-          return workflowData.items.every((item) =>
-            [CircleWorkflowStatus.Success, CircleWorkflowStatus.OnHold].includes(item.status),
-          )
-        } else {
-          return false
-        }
       })
 
-      return lastSuccessfulBuild?.vcs?.revision
+      const lastSuccessfulRun = runs.data.find((run) => isFullSuccessfulRunOnBranch(run, branch))
+      if (lastSuccessfulRun) return lastSuccessfulRun.references?.event?.attributes?.vcs?.revision
+
+      cursor = runs.page?.next ?? undefined
+      if (!cursor) break
     }
   } catch (e) {
-    console.log(`Failed to call Circle API v2 with error: ${e.message}`)
+    console.log(`Failed to call Circle API v3 with error: ${e.message}`)
   }
 }

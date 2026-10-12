@@ -66,7 +66,7 @@ It is useful to set up branch protection rules to prevent code from being merged
 
 ## Advanced Configuration
 
-circletron can be configured to only run workflows on target branches in the packages that have changed since the last successful build on that branch. This feature reads the project's runs from the Circle API v3 so requires a personal API token to be provided, via the `CIRCLE_TOKEN` environment variable. The project is identified by the built-in `CIRCLE_PROJECT_ID` environment variable. This feature can be turned on using `runOnlyChangedOnTargetBranches`:
+circletron can be configured to only run workflows on target branches in the packages that have changed since the last successful build on that branch. This feature interacts with the Circle API v3 so requires an access token to be provided, via the `CIRCLE_TOKEN` environment variable. This feature can be turned on using `runOnlyChangedOnTargetBranches`:
 
 ```yml
 runOnlyChangedOnTargetBranches: true

@@ -2,13 +2,9 @@
 
 - 2026/10/12 - 3.0.17
 
-  - `runOnlyChangedOnTargetBranches`: look up the last successful build with
-    the Circle API v3 runs endpoint instead of the v2 pipelines endpoint. The v2
-    endpoint returns no `vcs` block for GitHub App pipelines, so the lookup
-    threw `Cannot read properties of undefined (reading 'revision')` and every
-    push to a target branch ran all pipelines. The project is read from
-    `CIRCLE_PROJECT_ID`. Scheduled runs are no longer used as the baseline, as
-    they only run the scheduled job's packages.
+  - `runOnlyChangedOnTargetBranches`: find the last successful build with the
+    Circle API v3 runs endpoint. The v2 pipelines endpoint omits `vcs` for
+    GitHub App pipelines, so every push to a target branch ran all pipelines.
 
 - 2026/10/11 - 3.0.16
 

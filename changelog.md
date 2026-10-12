@@ -1,5 +1,11 @@
 # Changelog
 
+- 2026/10/12 - 3.0.17
+
+  - `runOnlyChangedOnTargetBranches`: find the last successful build with the
+    Circle API v3 runs endpoint. The v2 pipelines endpoint omits `vcs` for
+    GitHub App pipelines, so every push to a target branch ran all pipelines.
+
 - 2026/10/11 - 3.0.16
 
   - Add opt-in `githubAppCheckNames` option. CircleCI GitHub App integrations

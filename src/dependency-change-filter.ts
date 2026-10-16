@@ -184,11 +184,12 @@ export async function applyDependencyChangeFilter(
 ): Promise<FilterResult> {
   try {
     const [diffOutput, graphOutput, baseIgnoreChanges] = await Promise.all([
-      spawnGetStdout('git', ['diff', '--name-only', '--no-renames', changesSinceCommit]),
+      spawnGetStdout('git', ['diff', '--name-only', '--no-renames', '-z', changesSinceCommit]),
       spawnGetStdout('lerna', ['list', '--graph', '--all']),
       readLernaIgnoreChanges(),
     ])
-    const changedFiles = diffOutput.split('\n').filter(Boolean)
+    // NUL-separated, so git never quotes paths with special characters
+    const changedFiles = diffOutput.split('\0').filter(Boolean)
     const decisions = decideFilteredPackages(
       filter,
       packages,

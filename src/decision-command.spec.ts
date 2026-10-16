@@ -57,6 +57,12 @@ describe('applyDecisionCommand', () => {
     ['a failing exit', command('process.exit(1)')],
     ['invalid output', command('console.log("nope")')],
     ['a timeout', command('setTimeout(()=>{},60000)', 0.2)],
+    [
+      'output over the byte limit in multibyte characters',
+      command(
+        'process.stdout.write(JSON.stringify({decisions:{"a-e2e":{skip:true,reason:"\u4e00".repeat(400000)}}}))',
+      ),
+    ],
   ])('keeps every decision on %s', async (_, failing) => {
     const decisions = makeDecisions()
     await applyDecisionCommand(failing, decisions, 'abc')

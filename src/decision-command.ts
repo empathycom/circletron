@@ -45,7 +45,8 @@ export function runDecisionCommand(
       // own process group, so a timeout also kills what the shell started
       detached: true,
     })
-    let stdout = ''
+    const chunks: Buffer[] = []
+    let bytes = 0
     let settled = false
     const settle = (error?: Error) => {
       if (settled) return
@@ -59,7 +60,7 @@ export function runDecisionCommand(
         }
         reject(error)
       } else {
-        resolve(stdout)
+        resolve(Buffer.concat(chunks).toString())
       }
     }
     const timer = setTimeout(
@@ -68,9 +69,11 @@ export function runDecisionCommand(
     )
 
     proc.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString()
-      if (stdout.length > MAX_OUTPUT_BYTES) {
+      bytes += chunk.length
+      if (bytes > MAX_OUTPUT_BYTES) {
         settle(new Error(`printed more than ${MAX_OUTPUT_BYTES} bytes`))
+      } else {
+        chunks.push(chunk)
       }
     })
     proc.on('error', (e) => settle(e))

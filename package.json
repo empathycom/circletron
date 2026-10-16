@@ -1,6 +1,6 @@
 {
   "name": "circletron",
-  "version": "3.0.17",
+  "version": "3.0.18",
   "description": "circle orb for dealing with monorepos",
   "author": "insidewhy <github@chilon.net>",
   "license": "ISC",
@@ -44,6 +44,7 @@
   },
   "devDependencies": {
     "@types/jest": "26.0.23",
+    "@types/minimatch": "3.0.5",
     "@types/node": "15.12.4",
     "@typescript-eslint/eslint-plugin": "4.28.0",
     "@typescript-eslint/parser": "4.28.0",
@@ -59,6 +60,7 @@
   },
   "dependencies": {
     "axios": "^0.21.1",
+    "minimatch": "3.1.2",
     "yaml": "^1.10.2"
   }
 }

@@ -4,12 +4,18 @@ import { readFile } from 'fs'
 import { promisify } from 'util'
 import axios from 'axios'
 import { parse as yamlParse, stringify as yamlStringify } from 'yaml'
-import { join as pathJoin } from 'path'
+import { join as pathJoin, relative as pathRelative } from 'path'
 
 import { getLastSuccessfulBuildRevisionOnBranch } from './circle'
 import { requireEnv } from './env'
 import { getBranchpointCommitAndTargetBranch } from './git'
 import { spawnGetStdout } from './command'
+import {
+  applyDependencyChangeFilter,
+  DependencyChangeFilter,
+  FilterPackage,
+  parseDependencyChangeFilter,
+} from './dependency-change-filter'
 import {
   GITHUB_CHECKS_APP_ID_VAR,
   GITHUB_CHECKS_APP_PRIVATE_KEY_VAR,
@@ -49,9 +55,10 @@ interface CircletronConfig {
   checkNames: Record<string, string>
   // CircleCI GitHub App integrations name checks `<workflow> - <definition id prefix>`
   githubAppCheckNames: boolean
+  dependencyChangeFilter?: DependencyChangeFilter
 }
 
-async function getPackages(): Promise<Package[]> {
+async function getPackages(): Promise<{ packages: Package[]; filterPackages: FilterPackage[] }> {
   const packageOutput = await spawnGetStdout('lerna', ['list', '--parseable', '--all', '--long'])
   const allPackages = await Promise.all(
     packageOutput
@@ -66,14 +73,21 @@ async function getPackages(): Promise<Package[]> {
           // no circle config, filter below
         }
 
-        return { circleConfig, name }
+        return { circleConfig, name, location: pathRelative(process.cwd(), fullPath) }
       }),
   )
 
-  function hasConfig(pkg: { circleConfig?: CircleConfig }): pkg is Package {
+  function hasConfig<T extends { circleConfig?: CircleConfig }>(pkg: T): pkg is T & Package {
     return !!pkg.circleConfig
   }
-  return allPackages.filter(hasConfig)
+  return {
+    packages: allPackages.filter(hasConfig),
+    filterPackages: allPackages.map(({ name, location, circleConfig }) => ({
+      name,
+      location,
+      circleDependencies: circleConfig?.dependencies ?? [],
+    })),
+  }
 }
 
 /**
@@ -92,6 +106,7 @@ const getTriggerPackages = async (
   triggerPackages: Set<string>
   targetBranch: string
   filteredPackages: Package[]
+  changesSinceCommit?: string
 }> => {
   const changedPackages = new Set<string>()
   const allPackageNames = new Set(packages.map((pkg) => pkg.name))
@@ -172,6 +187,7 @@ const getTriggerPackages = async (
     ),
     targetBranch: targetBranch ?? branch,
     filteredPackages: packages,
+    changesSinceCommit,
   }
 }
 
@@ -327,6 +343,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     skip?: string
     checkNames?: Record<string, string>
     githubAppCheckNames?: boolean
+    dependencyChangeFilter?: unknown
   } = {}
   try {
     rawConfig = yamlParse((await pReadFile(pathJoin('.circleci', 'circletron.yml'))).toString())
@@ -349,6 +366,7 @@ export async function getCircletronConfig(): Promise<CircletronConfig> {
     skip: skip,
     checkNames: rawConfig.checkNames ?? {},
     githubAppCheckNames: Boolean(rawConfig.githubAppCheckNames),
+    dependencyChangeFilter: parseDependencyChangeFilter(rawConfig.dependencyChangeFilter),
   }
 }
 
@@ -358,16 +376,44 @@ export async function triggerCiJobs(
   scheduleJobToRun: string,
 ): Promise<void> {
   const circletronConfig = await getCircletronConfig()
-  const packages = await getPackages()
+  const { packages, filterPackages } = await getPackages()
   // run all jobs on target branches
   const isTargetBranch = circletronConfig.targetBranchesRegex.test(branch)
-  const { filteredPackages, triggerPackages, targetBranch } = await getTriggerPackages(
+  const affected = await getTriggerPackages(
     packages,
     circletronConfig,
     branch,
     isTargetBranch,
     scheduleJobToRun,
   )
+  const { filteredPackages, targetBranch, changesSinceCommit } = affected
+  let { triggerPackages } = affected
+
+  const skipSummaries: Record<string, string> = {}
+  const { dependencyChangeFilter } = circletronConfig
+  if (dependencyChangeFilter && !isTargetBranch && scheduleJobToRun === 'default') {
+    if (changesSinceCommit) {
+      const result = await applyDependencyChangeFilter(
+        dependencyChangeFilter,
+        filterPackages,
+        triggerPackages,
+        changesSinceCommit,
+      )
+      triggerPackages = result.triggerPackages
+      for (const pkg of filteredPackages) {
+        const reason = result.skipReasons[pkg.name]
+        if (reason) {
+          for (const workflow of Object.keys(pkg.circleConfig.workflows ?? {})) {
+            skipSummaries[workflow] =
+              `The workflow \`${workflow}\` was skipped by circletron's dependencyChangeFilter: ` +
+              `${reason}.`
+          }
+        }
+      }
+    } else {
+      console.warn('Warning: no branchpoint commit, dependencyChangeFilter is not applied')
+    }
+  }
 
   const skippedWorkflows = getSkippedWorkflows(filteredPackages, triggerPackages)
   // one artifact per pipeline listing every skipped workflow, uploaded via the
@@ -398,7 +444,7 @@ export async function triggerCiJobs(
           // tokens without Checks API access (e.g. personal access tokens)
           // fall back to a classic commit status under the same context
           const posted =
-            (await postSkippedCheckRun(target, checkName, workflow)) ||
+            (await postSkippedCheckRun(target, checkName, workflow, skipSummaries[workflow])) ||
             (await postSkippedCommitStatus(target, checkName, workflow))
           return { workflow, posted }
         }),

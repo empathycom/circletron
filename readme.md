@@ -141,3 +141,26 @@ circletron report-skip --workflow my-workflow --reason halted-on-branch
 ```
 
 Unlike `skip: check-runs` this variant never collides with required check names: the check run is named `my-workflow (circletron: skipped — halted-on-branch)` with conclusion `skipped`, and a per-job artifact with a `status` of `skipped-halted-on-branch` is written to `/tmp/circletron/skip.json` (register it with `store_artifacts` to upload it). Repository owner/name and commit SHA are read from the built-in `CIRCLE_PROJECT_USERNAME`, `CIRCLE_PROJECT_REPONAME` and `CIRCLE_SHA1` environment variables; pipeline id/number are read from `CIRCLETRON_PIPELINE_ID`/`CIRCLETRON_PIPELINE_NUMBER` if set.
+
+## Filtering dependency changes
+
+By default a package runs when any file in it or in one of its dependencies changed. `dependencyChangeFilter` narrows that for the packages whose name matches `packages`, on branches that don't match `targetBranches` (target branches are unchanged):
+
+```yml
+# .circleci/circletron.yml
+dependencyChangeFilter:
+  packages: '-e2e$'
+  ignoreChanges:
+    - '*.spec.*'
+    - '**/tests/**'
+  # optional
+  command:
+    run: node scripts/decide.js
+    timeoutSeconds: 180
+```
+
+- A change in the package's own directory always counts.
+- A change in a dependency (workspace dependencies, transitively, and `circle.yml` `dependencies`) counts only for files that match neither `ignoreChanges` nor lerna.json's `ignoreChanges`. Globs use lerna's matching rules (`matchBase`, `dot`).
+- When `command` is set, it is asked about each package that is still triggered only by dependency changes. It reads `{ "sinceCommit": "<sha>", "packages": [{ "name": "...", "dependencyChanges": [{ "pkg": "...", "files": ["..."] }] }] }` on stdin and prints `{ "decisions": { "<name>": { "skip": true, "reason": "..." } } }` on stdout. Its stderr goes to the job log.
+- Fail safe: an invalid filter, a failing git/lerna call, or a command that fails, times out or prints invalid output leaves every package running. A package the command gives no decision for keeps running.
+- Every decision is logged with its reason, and skipped workflows are reported as `skipped` check runs whose summary carries the reason.

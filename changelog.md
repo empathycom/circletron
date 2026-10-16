@@ -1,5 +1,13 @@
 # Changelog
 
+- 2026/10/16 - 3.0.18
+
+  - Add opt-in `dependencyChangeFilter`: on non-target branches, packages
+    matching its `packages` regex run on dependency changes only when the
+    changed files are outside its `ignoreChanges` globs, and an optional
+    `command` can skip packages still triggered only by dependency changes.
+    Any failure keeps today's behaviour.
+
 - 2026/10/12 - 3.0.17
 
   - `runOnlyChangedOnTargetBranches`: find the last successful build with the

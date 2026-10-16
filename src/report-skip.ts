@@ -208,6 +208,7 @@ export async function postSkippedCheckRun(
   target: CheckRunTarget,
   checkName: string,
   workflow: string,
+  summary?: string,
 ): Promise<boolean> {
   try {
     await postCheckRun(target, {
@@ -217,7 +218,9 @@ export async function postSkippedCheckRun(
       conclusion: 'skipped',
       output: {
         title: 'Workflow skipped: unaffected',
-        summary: `The workflow \`${workflow}\` was skipped by circletron because the package was unaffected by the changes on this branch.`,
+        summary:
+          summary ??
+          `The workflow \`${workflow}\` was skipped by circletron because the package was unaffected by the changes on this branch.`,
       },
     })
     console.log(`Created skipped check run '${checkName}'`)

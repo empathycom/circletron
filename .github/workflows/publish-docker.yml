@@ -16,7 +16,8 @@ env:
 jobs:
   publish:
     name: Publish Docker image
-    runs-on: ubuntu-latest
+    # x64: the image is amd64-only (see platforms below)
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
